@@ -5,6 +5,8 @@
 // @description  Rellena por defecto textareas especificos de antecedentes cuando estan vacios.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*/ficha/antecedentes*
+// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto-1.3.0.user.js
+// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto-1.3.0.user.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
