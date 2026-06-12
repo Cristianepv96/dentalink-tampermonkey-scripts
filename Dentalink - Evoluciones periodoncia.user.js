@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      1.6.0
-// @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
+// @version      2.0.0
+// @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
@@ -18,7 +18,7 @@
   const { isVisible, escapeHtml, getPatientIdFromUrl, onUrlChange } = window.__dlkUtils;
 
   // ═══════════════════════════════════════════════════════════════════════
-  // CONFIGURACIÓN CLÍNICA (editar aquí los textos frecuentes)
+  // CONFIGURACIÓN CLÍNICA (editar aquí los textos y precios frecuentes)
   // ═══════════════════════════════════════════════════════════════════════
 
   const CONFIG = {
@@ -31,7 +31,29 @@
       naproxeno: "Naproxeno 500mg tabletas #9 Tomar 1 tab cada 8 horas por 3 días. En caso de dolor no tolerable o indicación en posología."
     },
     sutura: "Seda 3.0 punto simple",
-    notaControles: "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal."
+    notaControles: "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.",
+
+    // Precios por defecto (pesos colombianos). Se pueden editar desde el panel.
+    precios: {
+      "Valoración": 48375,
+      "Alisado cerrado": 122175,
+      "Alisado abierto": 145950,
+      "Ajuste oclusal": 264675,
+      "Drenaje": 165000,
+      "Alargamiento": 105000,
+      "Detartraje": 0
+    },
+
+    // porDiente: true → precio × nro dientes | false → precio × 1
+    procedimientos: {
+      "Valoración": { porDiente: false },
+      "Alisado cerrado": { porDiente: true },
+      "Alisado abierto": { porDiente: true },
+      "Ajuste oclusal": { porDiente: true },
+      "Drenaje": { porDiente: true },
+      "Alargamiento": { porDiente: true },
+      "Detartraje": { porDiente: true }
+    }
   };
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -40,7 +62,10 @@
   const MODAL_ID = "dlk-evo-periodoncia-modal";
   const STYLE_ID = "dlk-evo-periodoncia-style";
   const UNDO_ID = "dlk-evo-periodoncia-undo";
+  const PROD_PANEL_ID = "dlk-produccion-panel";
   const PERIO_STORAGE_KEY = "dlk_periodontograma_resumen_v1";
+  const PRODUCCION_KEY = "dlk_produccion_v1";
+  const PRECIOS_KEY = "dlk_precios_v1";
   const TARGET_PATHS = [
     /\/pacientes\/\d+\/tratamiento\/\d+\b/i,
     /\/pacientes\/\d+\/ficha\/evoluciones\b/i
@@ -50,8 +75,12 @@
     "Alisado cerrado",
     "Alisado abierto",
     "Alargamiento",
-    "Detartraje"
+    "Detartraje",
+    "Ajuste oclusal",
+    "Drenaje"
   ];
+
+  // ─── Helpers ───
 
   function isTargetPage() {
     return TARGET_PATHS.some((path) => path.test(location.pathname));
@@ -60,13 +89,10 @@
   function getSavedPeriodontalSummary() {
     const patientId = getPatientIdFromUrl();
     if (!patientId) return "";
-
     try {
       const records = JSON.parse(localStorage.getItem(PERIO_STORAGE_KEY) || "{}");
       return records?.[patientId]?.text || "";
-    } catch (_error) {
-      return "";
-    }
+    } catch (_) { return ""; }
   }
 
   function getEditor() {
@@ -92,20 +118,13 @@
   function currentTimeRange(durationMinutes = 30) {
     const end = new Date();
     const start = new Date(end.getTime() - durationMinutes * 60 * 1000);
-    return {
-      start: formatHour(start),
-      end: formatHour(end)
-    };
+    return { start: formatHour(start), end: formatHour(end) };
   }
 
   function dispatchEditorEvents(editor, text) {
     try {
-      editor.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        inputType: "insertText",
-        data: text
-      }));
-    } catch (_error) {
+      editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+    } catch (_) {
       editor.dispatchEvent(new Event("input", { bubbles: true }));
     }
     editor.dispatchEvent(new Event("change", { bubbles: true }));
@@ -114,19 +133,120 @@
 
   function insertHtmlInEditor(editor, html) {
     editor.focus();
-    // Append via innerHTML — ProseMirror detects the DOM mutation
-    // and re-parses the content, preserving paragraph structure.
     editor.innerHTML += html;
   }
+
+  // ─── Tooth counting ───
+
+  function countTeeth(dientesStr) {
+    if (!dientesStr || !dientesStr.trim()) return 0;
+    let count = 0;
+    const parts = dientesStr.replace(/\./g, "").split(",").map((s) => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      if (part.includes("-")) {
+        const nums = part.split("-").map((s) => parseInt(s.trim(), 10));
+        if (nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1])) {
+          count += Math.abs(nums[1] - nums[0]) + 1;
+        }
+      } else {
+        if (!isNaN(parseInt(part, 10))) count += 1;
+      }
+    }
+    return count;
+  }
+
+  function formatCurrency(amount) {
+    return "$" + String(Math.round(amount)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
+
+  function toSlug(str) {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "_").toLowerCase();
+  }
+
+  // ─── Price storage ───
+
+  function getPrecios() {
+    try {
+      const custom = JSON.parse(localStorage.getItem(PRECIOS_KEY) || "{}");
+      return { ...CONFIG.precios, ...custom };
+    } catch (_) { return { ...CONFIG.precios }; }
+  }
+
+  function savePrecio(tipo, precio) {
+    try {
+      const all = getPrecios();
+      all[tipo] = precio;
+      localStorage.setItem(PRECIOS_KEY, JSON.stringify(all));
+    } catch (_) { /* ignore */ }
+  }
+
+  // ─── Production log ───
+
+  function getProduccionLog() {
+    try { return JSON.parse(localStorage.getItem(PRODUCCION_KEY) || "[]"); }
+    catch (_) { return []; }
+  }
+
+  function saveProduccionLog(log) {
+    try { localStorage.setItem(PRODUCCION_KEY, JSON.stringify(log)); }
+    catch (_) { /* ignore */ }
+  }
+
+  function logProduction(tipo, cantidad, precioUnitario) {
+    const log = getProduccionLog();
+    const id = Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    log.push({
+      id, tipo, cantidad, precioUnitario,
+      valorTotal: cantidad * precioUnitario,
+      fecha: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString()
+    });
+    saveProduccionLog(log);
+    return id;
+  }
+
+  function removeProduccionEntry(id) {
+    saveProduccionLog(getProduccionLog().filter((e) => e.id !== id));
+  }
+
+  function purgeOldProduction() {
+    const cutoff = new Date();
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const log = getProduccionLog().filter((e) => e.fecha >= cutoffStr);
+    saveProduccionLog(log);
+  }
+
+  function buildProductionSummary() {
+    const log = getProduccionLog();
+    const today = new Date().toISOString().slice(0, 10);
+    const month = today.slice(0, 7);
+
+    const todayEntries = log.filter((e) => e.fecha === today);
+    const monthEntries = log.filter((e) => e.fecha.startsWith(month));
+
+    const todayTotal = todayEntries.reduce((s, e) => s + e.valorTotal, 0);
+    const monthTotal = monthEntries.reduce((s, e) => s + e.valorTotal, 0);
+
+    const todayGroups = {};
+    todayEntries.forEach((e) => {
+      if (!todayGroups[e.tipo]) todayGroups[e.tipo] = { cantidad: 0, total: 0 };
+      todayGroups[e.tipo].cantidad += e.cantidad;
+      todayGroups[e.tipo].total += e.valorTotal;
+    });
+
+    return { todayGroups, todayTotal, monthTotal };
+  }
+
+  // ─── Insert with production tracking ───
 
   function removeUndo() {
     document.getElementById(UNDO_ID)?.remove();
     window.clearTimeout(removeUndo.timer);
   }
 
-  function showUndoButton(editor, previousHtml) {
+  function showUndoButton(editor, previousHtml, onUndo) {
     removeUndo();
-
     const btn = document.createElement("button");
     btn.id = UNDO_ID;
     btn.type = "button";
@@ -136,6 +256,7 @@
       event.stopPropagation();
       editor.innerHTML = previousHtml;
       dispatchEditorEvents(editor, "");
+      if (typeof onUndo === "function") onUndo();
       removeUndo();
     });
 
@@ -146,24 +267,61 @@
       const anchor = editor.closest(".sc-fa-dssr") || editor.closest("form") || editor.parentElement || editor;
       anchor.parentElement?.insertBefore(btn, anchor);
     }
-
     removeUndo.timer = window.setTimeout(removeUndo, 10000);
   }
 
-  function insertText(text) {
+  function insertText(text, onUndo) {
     const editor = getEditor();
     if (!editor) {
       alert("No se encontró el editor de evolución.");
+      return false;
+    }
+    const previousHtml = editor.innerHTML;
+    insertHtmlInEditor(editor, linesToHtml(text));
+    dispatchEditorEvents(editor, text);
+    showUndoButton(editor, previousHtml, onUndo);
+    return true;
+  }
+
+  function handleInsertWithTracking(tipo, text, dientesStr) {
+    const precios = getPrecios();
+    let precio = precios[tipo];
+
+    if (precio === undefined || precio === 0) {
+      const perDiente = CONFIG.procedimientos[tipo]?.porDiente !== false;
+      const label = perDiente ? "por diente" : "por consulta";
+      const input = prompt(`¿Cuál es el valor de "${tipo}" ${label}?\n(Ingrese el valor en pesos sin puntos ni comas)`);
+      if (input === null) { insertText(text); return; }
+      precio = parseInt(input.replace(/\D/g, ""), 10);
+      if (isNaN(precio) || precio < 0) { insertText(text); return; }
+      savePrecio(tipo, precio);
+    }
+
+    const porDiente = CONFIG.procedimientos[tipo]?.porDiente !== false;
+    const cantidad = porDiente ? countTeeth(dientesStr) : 1;
+
+    if (cantidad === 0 && porDiente) {
+      insertText(text);
       return;
     }
 
-    const previousHtml = editor.innerHTML;
-    const html = linesToHtml(text);
+    const entry = { id: null };
+    const success = insertText(text, function () {
+      if (entry.id) {
+        removeProduccionEntry(entry.id);
+        updateProductionPanel();
+      }
+    });
 
-    insertHtmlInEditor(editor, html);
-    dispatchEditorEvents(editor, text);
-    showUndoButton(editor, previousHtml);
+    if (success) {
+      entry.id = logProduction(tipo, cantidad, precio);
+      updateProductionPanel();
+    }
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // TEXTOS DE EVOLUCIÓN
+  // ═══════════════════════════════════════════════════════════════════════
 
   function buildAlisadoCerradoText(values) {
     const duration = Number(values.duracion) || 45;
@@ -310,7 +468,6 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
   function buildValoracionText() {
     const periodontalSummary = getSavedPeriodontalSummary();
-
     if (periodontalSummary) {
       return `Paciente acude a cita de valoración especializada por periodoncia, se observan deficiencias en higiene oral, sangrado al sondaje e inflamación generalizada, requiriendo manejo con periodoncia para evitar exacerbación de la enfermedad periodontal. Al sondaje se observan bolsas periodontales en dientes:
 
@@ -320,7 +477,6 @@ ${CONFIG.notaControles}
 
 Cita 20 min`;
     }
-
     return `Paciente acude a cita de valoración especializada por periodoncia, se observan deficiencias en higiene oral, sangrado al sondaje e inflamación generalizada, requiriendo manejo con periodoncia para evitar exacerbación de la enfermedad periodontal. Al sondaje se observan bolsas periodontales en dientes:
 
 Se sugiere realizar 
@@ -367,114 +523,219 @@ ${CONFIG.notaControles}
 ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
+  function buildAjusteOclusalText(values) {
+    const range = currentTimeRange(20);
+    return `DIAGNÓSTICO: ${CONFIG.diagnostico}
+PROCEDIMIENTO: Ajuste oclusal selectivo.
+Dientes: ${values.dientes}
+HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
+
+VALORACION Y PREPARACION
+Hallazgos clínicos: Se identifican contactos prematuros e interferencias oclusales que contribuyen al trauma oclusal secundario y comprometen el pronóstico periodontal de las piezas involucradas.
+
+PROCEDIMIENTO
+Marcaje: Se utiliza papel articular de diferente grosor para identificar y marcar los contactos prematuros en oclusión céntrica y movimientos excursivos (lateralidad y protrusión).
+
+Desgaste selectivo: Se realiza ajuste oclusal controlado con fresas de diamante de grano fino y piedras de Arkansas, eliminando selectivamente las interferencias marcadas.
+
+Verificación: Se comprueba repetidamente con papel articular hasta obtener contactos simultáneos, equilibrados y bilaterales en céntrica, sin interferencias en movimientos excursivos.
+
+Pulido: Se realiza pulido de las superficies ajustadas para eliminar irregularidades residuales.
+
+INDICACIONES Y EGRESO
+Egreso: Paciente finaliza el procedimiento en buenas condiciones generales, con oclusión equilibrada y sin molestias.
+
+Recomendaciones:
+Posible sensibilidad transitoria en las zonas ajustadas.
+Control en 15 días para verificar la estabilidad oclusal.
+
+${CONFIG.notaControles}
+
+ATENDIDO POR: ${CONFIG.doctor}`;
+  }
+
+  function buildDrenajeText(values) {
+    const range = currentTimeRange(30);
+    return `DIAGNÓSTICO: ${CONFIG.diagnostico}
+PROCEDIMIENTO: Drenaje periodontal.
+Dientes: ${values.dientes}
+HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
+
+VALORACION Y PREPARACION
+Hallazgos clínicos: Se evidencia presencia de exudado purulento/supuración activa en los tejidos periodontales, con inflamación aguda y dolor localizado, consistente con absceso periodontal.
+
+PROCEDIMIENTO
+Drenaje: Se procede a drenar el absceso periodontal mediante acceso por el surco gingival, permitiendo la salida del contenido purulento y reducción de la presión tisular.
+
+Desbridamiento: Se realiza curetaje subgingival e irrigación profusa con clorhexidina al 0.12% para eliminar detritos necróticos, cálculos y biofilm subgingival que perpetúan la infección.
+
+Irrigación: Lavado abundante de la zona con solución salina para garantizar la eliminación completa del material purulento.
+
+INDICACIONES Y EGRESO
+Egreso: Paciente finaliza el procedimiento con disminución del dolor, control de la infección aguda y hemostasia controlada.
+
+Recomendaciones:
+Enjuague con clorhexidina al 0.12% cada 12 horas por 7 días.
+Control en 5-7 días para reevaluación del estado periodontal.
+Evitar cepillado traumático en la zona afectada.
+
+${CONFIG.notaControles}
+
+ATENDIDO POR: ${CONFIG.doctor}`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ESTILOS
+  // ═══════════════════════════════════════════════════════════════════════
+
   function ensureStyles() {
     if (document.getElementById(STYLE_ID)) return;
-
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
       #${PANEL_ID} {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin: 8px 0;
+        display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
       #${PANEL_ID} button {
-        border: 1px solid #cbd5e1;
-        border-radius: 5px;
-        background: #fff;
-        color: #334155;
-        cursor: pointer;
-        font: 700 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-        padding: 6px 8px;
+        border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #334155;
+        cursor: pointer; font: 700 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; padding: 6px 8px;
       }
-      #${PANEL_ID} button:hover {
-        border-color: #0284c7;
-        color: #0369a1;
-      }
+      #${PANEL_ID} button:hover { border-color: #0284c7; color: #0369a1; }
       #${UNDO_ID} {
-        border: 1px solid #f97316;
-        border-radius: 5px;
-        background: #fff7ed;
-        color: #c2410c;
-        cursor: pointer;
-        font: 700 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
-        padding: 6px 8px;
-        animation: dlk-undo-fade 10s ease-in forwards;
+        border: 1px solid #f97316; border-radius: 5px; background: #fff7ed; color: #c2410c;
+        cursor: pointer; font: 700 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        padding: 6px 8px; animation: dlk-undo-fade 10s ease-in forwards;
       }
-      #${UNDO_ID}:hover {
-        background: #fed7aa;
-      }
-      @keyframes dlk-undo-fade {
-        0%, 70% { opacity: 1; }
-        100% { opacity: 0; }
-      }
+      #${UNDO_ID}:hover { background: #fed7aa; }
+      @keyframes dlk-undo-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
       #${MODAL_ID} {
-        position: fixed;
-        inset: 0;
-        z-index: 1000000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(15, 23, 42, 0.38);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+        position: fixed; inset: 0; z-index: 1000000; display: flex; align-items: center; justify-content: center;
+        background: rgba(15, 23, 42, 0.38); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       }
       #${MODAL_ID} .box {
-        width: min(420px, calc(100vw - 32px));
-        border-radius: 8px;
-        background: #fff;
-        box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25);
-        padding: 16px;
+        width: min(420px, calc(100vw - 32px)); border-radius: 8px; background: #fff;
+        box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25); padding: 16px;
       }
-      #${MODAL_ID} h3 {
-        margin: 0 0 12px;
-        color: #0f172a;
-        font-size: 16px;
-      }
-      #${MODAL_ID} label {
-        display: block;
-        margin: 8px 0 4px;
-        color: #475569;
-        font-size: 12px;
-        font-weight: 700;
-      }
+      #${MODAL_ID} h3 { margin: 0 0 12px; color: #0f172a; font-size: 16px; }
+      #${MODAL_ID} label { display: block; margin: 8px 0 4px; color: #475569; font-size: 12px; font-weight: 700; }
       #${MODAL_ID} input {
-        box-sizing: border-box;
-        width: 100%;
-        border: 1px solid #cbd5e1;
-        border-radius: 5px;
-        padding: 8px;
-        font-size: 13px;
+        box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 5px; padding: 8px; font-size: 13px;
       }
-      #${MODAL_ID} .actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-        margin-top: 14px;
+      #${MODAL_ID} .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+      #${MODAL_ID} button { border: 0; border-radius: 5px; cursor: pointer; font-weight: 700; padding: 8px 10px; }
+      #${MODAL_ID} .cancel { background: #e2e8f0; color: #334155; }
+      #${MODAL_ID} .insert { background: #0284c7; color: #fff; }
+      #${PROD_PANEL_ID} {
+        position: fixed; right: 10px; bottom: 10px; z-index: 999998; width: 230px; padding: 10px;
+        border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 8px;
+        background: rgba(255, 255, 255, 0.97); box-shadow: 0 4px 16px rgba(15, 23, 42, 0.10);
+        font: 11px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
-      #${MODAL_ID} button {
-        border: 0;
-        border-radius: 5px;
-        cursor: pointer;
-        font-weight: 700;
-        padding: 8px 10px;
+      #${PROD_PANEL_ID}.is-minimized .prod-body { display: none; }
+      #${PROD_PANEL_ID} .prod-title {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 8px; font-weight: 800; color: #334155; font-size: 12px; cursor: default;
       }
-      #${MODAL_ID} .cancel {
-        background: #e2e8f0;
-        color: #334155;
+      #${PROD_PANEL_ID}.is-minimized .prod-title { margin-bottom: 0; }
+      #${PROD_PANEL_ID} .prod-minimize {
+        width: 22px; height: 20px; padding: 0; border: 0; border-radius: 4px;
+        background: #e2e8f0; color: #334155; cursor: pointer; font-weight: 800; line-height: 1;
       }
-      #${MODAL_ID} .insert {
-        background: #0284c7;
-        color: #fff;
+      #${PROD_PANEL_ID} .prod-item {
+        display: flex; justify-content: space-between; padding: 3px 0; color: #334155;
       }
+      #${PROD_PANEL_ID} .prod-item-name { font-size: 11px; }
+      #${PROD_PANEL_ID} .prod-item-value { font-weight: 700; color: #0f766e; font-size: 11px; }
+      #${PROD_PANEL_ID} .prod-empty { color: #94a3b8; font-style: italic; padding: 4px 0; }
+      #${PROD_PANEL_ID} .prod-totals {
+        margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;
+      }
+      #${PROD_PANEL_ID} .prod-total-row {
+        display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px;
+      }
+      #${PROD_PANEL_ID} .prod-total-row strong { color: #0f766e; }
+      #${PROD_PANEL_ID} .prod-edit {
+        display: block; width: 100%; margin-top: 8px; padding: 5px;
+        border: 1px dashed #cbd5e1; border-radius: 4px; background: transparent;
+        color: #64748b; cursor: pointer; font-size: 10px; text-align: center;
+      }
+      #${PROD_PANEL_ID} .prod-edit:hover { background: #f1f5f9; color: #334155; }
     `;
     document.head.appendChild(style);
   }
 
-  function closePrompt() {
-    document.getElementById(MODAL_ID)?.remove();
+  // ═══════════════════════════════════════════════════════════════════════
+  // PRODUCTION PANEL UI
+  // ═══════════════════════════════════════════════════════════════════════
+
+  function updateProductionPanel() {
+    const panel = document.getElementById(PROD_PANEL_ID);
+    if (!panel) return;
+
+    const { todayGroups, todayTotal, monthTotal } = buildProductionSummary();
+    const itemsEl = panel.querySelector(".prod-items");
+    const totalsEl = panel.querySelector(".prod-totals");
+    if (!itemsEl || !totalsEl) return;
+
+    let itemsHtml = "";
+    for (const tipo of Object.keys(todayGroups)) {
+      const data = todayGroups[tipo];
+      itemsHtml += `<div class="prod-item">
+        <span class="prod-item-name">${escapeHtml(tipo)} ×${data.cantidad}</span>
+        <span class="prod-item-value">${formatCurrency(data.total)}</span>
+      </div>`;
+    }
+    if (!itemsHtml) itemsHtml = '<div class="prod-empty">Sin registros hoy</div>';
+    itemsEl.innerHTML = itemsHtml;
+
+    const meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+    totalsEl.innerHTML = `
+      <div class="prod-total-row"><span>Hoy:</span><strong>${formatCurrency(todayTotal)}</strong></div>
+      <div class="prod-total-row"><span>${meses[new Date().getMonth()]}:</span><strong>${formatCurrency(monthTotal)}</strong></div>
+    `;
   }
+
+  function ensureProductionPanel() {
+    ensureStyles();
+    let panel = document.getElementById(PROD_PANEL_ID);
+    if (panel) { updateProductionPanel(); return; }
+
+    panel = document.createElement("div");
+    panel.id = PROD_PANEL_ID;
+    panel.innerHTML = `
+      <div class="prod-title">
+        <span>📊 Producción</span>
+        <button type="button" class="prod-minimize" data-action="prod-minimize" title="Minimizar">−</button>
+      </div>
+      <div class="prod-body">
+        <div class="prod-items"></div>
+        <div class="prod-totals"></div>
+        <button type="button" class="prod-edit" data-action="edit-prices">⚙ Editar precios</button>
+      </div>
+    `;
+
+    panel.addEventListener("click", (event) => {
+      const action = event.target.closest("[data-action]")?.dataset.action;
+      if (!action) return;
+      if (action === "prod-minimize") {
+        panel.classList.toggle("is-minimized");
+        const btn = event.target.closest("button");
+        btn.textContent = panel.classList.contains("is-minimized") ? "+" : "−";
+        btn.title = panel.classList.contains("is-minimized") ? "Expandir" : "Minimizar";
+      }
+      if (action === "edit-prices") openPriceEditor();
+    });
+
+    document.body.appendChild(panel);
+    updateProductionPanel();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // MODALS & PROMPTS
+  // ═══════════════════════════════════════════════════════════════════════
+
+  function closePrompt() { document.getElementById(MODAL_ID)?.remove(); }
 
   function openFormPrompt(title, fields, onSubmit) {
     ensureStyles();
@@ -485,9 +746,9 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     modal.innerHTML = `
       <form class="box">
         <h3>${escapeHtml(title)}</h3>
-        ${fields.map((field) => `
-          <label for="dlk-evo-${field.name}">${escapeHtml(field.label)}</label>
-          <input id="dlk-evo-${field.name}" name="${field.name}" autocomplete="off" value="${escapeHtml(field.value || "")}">
+        ${fields.map((f) => `
+          <label for="dlk-evo-${f.name}">${escapeHtml(f.label)}</label>
+          <input id="dlk-evo-${f.name}" name="${f.name}" autocomplete="off" value="${escapeHtml(f.value || "")}">
         `).join("")}
         <div class="actions">
           <button class="cancel" type="button">Cancelar</button>
@@ -496,45 +757,52 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       </form>
     `;
 
-    const handleEsc = (event) => {
-      if (event.key === "Escape") {
-        closePrompt();
-      }
-    };
+    const handleEsc = (e) => { if (e.key === "Escape") closePrompt(); };
 
-    modal.addEventListener("click", (event) => {
-      if (event.target === modal || event.target.closest(".cancel")) {
-        closePrompt();
-      }
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal || e.target.closest(".cancel")) closePrompt();
     });
 
-    modal.querySelector("form").addEventListener("submit", (event) => {
-      event.preventDefault();
-      const form = event.currentTarget;
-      const values = Object.fromEntries(fields.map((field) => [
-        field.name,
-        form.elements[field.name].value.trim()
-      ]));
+    modal.querySelector("form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const form = e.currentTarget;
+      const values = Object.fromEntries(fields.map((f) => [f.name, form.elements[f.name].value.trim()]));
       onSubmit(values);
       closePrompt();
     });
 
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.removedNodes.forEach((node) => {
-          if (node === modal) {
-            document.removeEventListener("keydown", handleEsc);
-            observer.disconnect();
-          }
-        });
-      });
+    const obs = new MutationObserver((muts) => {
+      muts.forEach((m) => m.removedNodes.forEach((n) => {
+        if (n === modal) { document.removeEventListener("keydown", handleEsc); obs.disconnect(); }
+      }));
     });
-    observer.observe(document.body, { childList: true });
+    obs.observe(document.body, { childList: true });
 
     document.addEventListener("keydown", handleEsc);
     document.body.appendChild(modal);
     modal.querySelector("input")?.focus();
   }
+
+  function openPriceEditor() {
+    const precios = getPrecios();
+    const tipos = Object.keys(CONFIG.procedimientos);
+    const fields = tipos.map((tipo) => ({
+      name: toSlug(tipo),
+      label: `${tipo}${CONFIG.procedimientos[tipo].porDiente ? " (por diente)" : " (por consulta)"}`,
+      value: String(precios[tipo] || 0)
+    }));
+
+    openFormPrompt("Editar precios (COP)", fields, (values) => {
+      tipos.forEach((tipo) => {
+        const raw = values[toSlug(tipo)] || "0";
+        const precio = parseInt(raw.replace(/\D/g, ""), 10);
+        if (!isNaN(precio)) savePrecio(tipo, precio);
+      });
+      updateProductionPanel();
+    });
+  }
+
+  // ─── Prompt openers ───
 
   function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration) {
     openFormPrompt(title, [
@@ -542,7 +810,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       { name: "carpules", label: "Carpules en total", value: String(defaultCarpules) },
       { name: "tecnica", label: "Técnica anestésica", value: defaultTecnica },
       { name: "duracion", label: "Duración de la cita (minutos)", value: String(defaultDuration) }
-    ], (values) => insertText(builder(values)));
+    ], (values) => handleInsertWithTracking(title, builder(values), values.dientes));
   }
 
   function openAlargamientoPrompt() {
@@ -551,42 +819,43 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       { name: "restauracion", label: "Restauración", value: "" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "60" }
-    ], (values) => insertText(buildAlargamientoText(values)));
+    ], (values) => handleInsertWithTracking("Alargamiento", buildAlargamientoText(values), values.diente));
   }
 
   function openDetartrajePrompt() {
     openFormPrompt("Detartraje", [
       { name: "dientes", label: "Dientes", value: "" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
-    ], (values) => insertText(buildDetartrajeText(values)));
+    ], (values) => handleInsertWithTracking("Detartraje", buildDetartrajeText(values), values.dientes));
   }
+
+  function openAjusteOclusalPrompt() {
+    openFormPrompt("Ajuste oclusal", [
+      { name: "dientes", label: "Dientes", value: "" }
+    ], (values) => handleInsertWithTracking("Ajuste oclusal", buildAjusteOclusalText(values), values.dientes));
+  }
+
+  function openDrenajePrompt() {
+    openFormPrompt("Drenaje periodontal", [
+      { name: "dientes", label: "Dientes", value: "" }
+    ], (values) => handleInsertWithTracking("Drenaje", buildDrenajeText(values), values.dientes));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BUTTON HANDLERS & PANEL
+  // ═══════════════════════════════════════════════════════════════════════
 
   function handleButton(label) {
     if (label === "Valoración") {
-      insertText(buildValoracionText());
+      handleInsertWithTracking("Valoración", buildValoracionText(), "");
       return;
     }
-
-    if (label === "Alisado cerrado") {
-      openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45);
-      return;
-    }
-
-    if (label === "Alisado abierto") {
-      openAlisadoPrompt("Alisado abierto", buildAlisadoAbiertoText, 2, "Infiltrativa", 60);
-      return;
-    }
-
-    if (label === "Alargamiento") {
-      openAlargamientoPrompt();
-      return;
-    }
-
-    if (label === "Detartraje") {
-      openDetartrajePrompt();
-      return;
-    }
-
+    if (label === "Alisado cerrado") { openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45); return; }
+    if (label === "Alisado abierto") { openAlisadoPrompt("Alisado abierto", buildAlisadoAbiertoText, 2, "Infiltrativa", 60); return; }
+    if (label === "Alargamiento") { openAlargamientoPrompt(); return; }
+    if (label === "Detartraje") { openDetartrajePrompt(); return; }
+    if (label === "Ajuste oclusal") { openAjusteOclusalPrompt(); return; }
+    if (label === "Drenaje") { openDrenajePrompt(); return; }
     alert(`Boton "${label}" creado. Falta definir su texto.`);
   }
 
@@ -608,26 +877,17 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
   function ensurePanel() {
-    if (!isTargetPage()) {
-      removePanel();
-      return;
-    }
-
+    if (!isTargetPage()) { removePanel(); return; }
     const editor = getEditor();
-    if (!editor) {
-      removePanel();
-      return;
-    }
+    if (!editor) { removePanel(); return; }
 
     ensureStyles();
-
     let panel = document.getElementById(PANEL_ID);
     if (!panel) {
       panel = document.createElement("div");
       panel.id = PANEL_ID;
       BUTTONS.forEach((label) => panel.appendChild(createButton(label)));
     }
-
     const anchor = editor.closest(".sc-fa-dssr") || editor.closest("form") || editor.parentElement || editor;
     if (panel.nextElementSibling !== anchor) {
       anchor.parentElement?.insertBefore(panel, anchor);
@@ -636,13 +896,14 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
   function schedulePanel() {
     window.clearTimeout(schedulePanel.timer);
-    schedulePanel.timer = window.setTimeout(ensurePanel, 150);
+    schedulePanel.timer = window.setTimeout(() => {
+      ensurePanel();
+      ensureProductionPanel();
+    }, 150);
   }
 
+  purgeOldProduction();
   onUrlChange(schedulePanel);
-  new MutationObserver(schedulePanel).observe(document.body, {
-    childList: true,
-    subtree: true
-  });
+  new MutationObserver(schedulePanel).observe(document.body, { childList: true, subtree: true });
   schedulePanel();
 })();
