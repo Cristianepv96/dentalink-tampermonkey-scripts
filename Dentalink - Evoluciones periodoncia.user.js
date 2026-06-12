@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.2.0
+// @version      2.3.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -43,7 +43,9 @@
       "Ajuste oclusal": 264675,
       "Drenaje": 165000,
       "Alargamiento": 105000,
-      "Detartraje": 0
+      "Detartraje": 0,
+      "Control": 0,
+      "Frenillectomía": 0
     },
 
     // porDiente: true → precio × nro dientes | false → precio × 1
@@ -54,7 +56,9 @@
       "Ajuste oclusal": { porDiente: true },
       "Drenaje": { porDiente: true },
       "Alargamiento": { porDiente: true },
-      "Detartraje": { porDiente: true }
+      "Detartraje": { porDiente: true },
+      "Control": { porDiente: false },
+      "Frenillectomía": { porDiente: false }
     }
   };
 
@@ -82,7 +86,9 @@
     "Alargamiento",
     "Detartraje",
     "Ajuste oclusal",
-    "Drenaje"
+    "Drenaje",
+    "Control",
+    "Frenillectomía"
   ];
 
   // ─── Helpers ───
@@ -589,6 +595,100 @@ ${CONFIG.notaControles}
 ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
+
+
+  function buildControlText() {
+    const periodontalSummary = getSavedPeriodontalSummary();
+    const range = currentTimeRange(20);
+    const base = `DIAGNÓSTICO: ${CONFIG.diagnostico}
+PROCEDIMIENTO: Control periodontal de mantenimiento.
+HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
+
+EVALUACIÓN CLÍNICA
+Higiene oral: Se evalúa el índice de placa bacteriana y se verifica el cumplimiento de las instrucciones de higiene oral previamente indicadas.
+
+Evaluación periodontal: Se realiza sondaje periodontal de control y comparación con registros previos para determinar la estabilidad del tratamiento periodontal realizado.
+
+Sangrado al sondaje: Se registran los sitios con sangrado al sondaje como indicador de inflamación activa.
+
+Evaluación de tejidos blandos: Se valora color, textura, contorno y consistencia de la encía, verificando la resolución de la inflamación.
+
+PROCEDIMIENTO
+Se realiza profilaxis de mantenimiento con copa de caucho y pasta profiláctica para remoción de placa blanda residual.
+
+Se realiza detartraje ultrasónico de las zonas con depósitos calcificados identificados.
+
+Se refuerzan instrucciones de higiene oral: técnica de cepillado de Bass modificada, uso de seda dental y enjuague bucal según indicación.
+
+INDICACIONES Y EGRESO
+Egreso: Paciente finaliza la cita de control en buenas condiciones generales.
+
+Plan: Próximo control periodontal en 3 meses.`;
+
+    if (periodontalSummary) {
+      return base + `
+
+SONDAJE DE REFERENCIA:
+${periodontalSummary}
+
+${CONFIG.notaControles}
+
+ATENDIDO POR: ${CONFIG.doctor}`;
+    }
+    return base + `
+
+${CONFIG.notaControles}
+
+ATENDIDO POR: ${CONFIG.doctor}`;
+  }
+
+
+  function buildFrenillectomiaText(values) {
+    const duration = Number(values.duracion) || 30;
+    const range = currentTimeRange(duration);
+    return `DIAGNÓSTICO: Frenillo ${values.frenillo} corto / hipertrófico
+PROCEDIMIENTO: Frenillectomía.
+HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
+
+VALORACION Y PREPARACION
+Hallazgos clínicos: Se evidencia inserción baja/corta del frenillo ${values.frenillo} que compromete la dinámica de los tejidos periodontales, generando tracción sobre el margen gingival y/o limitación funcional.
+
+Consentimiento: El paciente firma y acepta el consentimiento informado, comprendiendo los riesgos de sangrado, inflamación postoperatoria y posible recidiva.
+
+Asepsia: Asepsia oral y perioral con Gluconato de Clorhexidina al 0.12%.
+
+ANESTESIA
+Farmaco: ${CONFIG.anestesia.farmaco} (${values.carpules} carpules en total).
+Técnica: ${values.tecnica}
+
+FASE QUIRURGICA
+Técnica: Se realiza frenillectomía mediante incisión en forma romboidal del frenillo ${values.frenillo}, abarcando desde la inserción mucosa hasta la inserción gingival.
+
+Disección: Se diseca el tejido conectivo del frenillo, liberando las fibras de inserción hasta lograr movilidad adecuada sin tracción sobre el margen gingival.
+
+Hemostasia: Control de hemostasia mediante compresión directa.
+
+SUTURA Y CIERRE
+Técnica: Cierre primario con ${CONFIG.sutura}.
+Se verifica la correcta movilidad de los tejidos post-sutura sin tensión residual.
+
+INDICACIONES Y EGRESO
+Egreso: Paciente finaliza el procedimiento en buenas condiciones generales, con hemostasia controlada.
+
+Farmacología:
+${CONFIG.farmacologia.naproxeno}
+
+Recomendaciones:
+Dieta blanda por 48 horas.
+No cepillar la zona de la sutura (usar gel de clorhexidina).
+Evitar esfuerzos físicos y exposición al sol.
+Cita para retiro de sutura en 8 días.
+
+${CONFIG.notaControles}
+
+ATENDIDO POR: ${CONFIG.doctor}`;
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // ESTILOS
   // ═══════════════════════════════════════════════════════════════════════
@@ -940,6 +1040,15 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     ], (values) => handleInsertWithTracking("Drenaje", buildDrenajeText(values), values.dientes));
   }
 
+  function openFrenillectomiaPrompt() {
+    openFormPrompt("Frenillectomía", [
+      { name: "frenillo", label: "Tipo de frenillo (labial superior, labial inferior, lingual)", value: "labial superior" },
+      { name: "carpules", label: "Carpules en total", value: "1" },
+      { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
+      { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
+    ], (values) => handleInsertWithTracking("Frenillectomía", buildFrenillectomiaText(values), ""));
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // BUTTON HANDLERS & PANEL
   // ═══════════════════════════════════════════════════════════════════════
@@ -955,6 +1064,8 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     if (label === "Detartraje") { openDetartrajePrompt(); return; }
     if (label === "Ajuste oclusal") { openAjusteOclusalPrompt(); return; }
     if (label === "Drenaje") { openDrenajePrompt(); return; }
+    if (label === "Control") { handleInsertWithTracking("Control", buildControlText(), ""); return; }
+    if (label === "Frenillectomía") { openFrenillectomiaPrompt(); return; }
     alert(`Boton "${label}" creado. Falta definir su texto.`);
   }
 
