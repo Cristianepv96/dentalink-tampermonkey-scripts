@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.1.0
+// @version      2.2.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -32,6 +32,7 @@
       naproxeno: "Naproxeno 500mg tabletas #9 Tomar 1 tab cada 8 horas por 3 días. En caso de dolor no tolerable o indicación en posología."
     },
     sutura: "Seda 3.0 punto simple",
+    metaDiaria: 3000000,
     notaControles: "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.",
 
     // Precios por defecto (pesos colombianos). Se pueden editar desde el panel.
@@ -675,6 +676,26 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       #${PROD_PANEL_ID} .prod-btn:hover { background: #f1f5f9; color: #334155; }
       #${PROD_PANEL_ID} .prod-sync-ok { border-color: #86efac; color: #16a34a; }
       #${PROD_PANEL_ID} .prod-sync-err { border-color: #fca5a5; color: #dc2626; }
+      #${PROD_PANEL_ID} .prod-goal {
+        margin-top: 8px; padding-top: 6px; border-top: 1px solid #e2e8f0;
+      }
+      #${PROD_PANEL_ID} .prod-goal-label {
+        display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-bottom: 4px;
+      }
+      #${PROD_PANEL_ID} .prod-goal-pct { font-weight: 800; color: #334155; }
+      #${PROD_PANEL_ID} .prod-goal-bar {
+        width: 100%; height: 8px; border-radius: 4px; background: #e2e8f0; overflow: hidden;
+      }
+      #${PROD_PANEL_ID} .prod-goal-fill {
+        height: 100%; border-radius: 4px; transition: width 0.4s ease, background 0.4s ease;
+        background: linear-gradient(90deg, #f97316, #eab308);
+      }
+      #${PROD_PANEL_ID} .prod-goal-fill.goal-hit {
+        background: linear-gradient(90deg, #22c55e, #10b981);
+      }
+      #${PROD_PANEL_ID} .prod-goal-amounts {
+        display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; margin-top: 2px;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -747,6 +768,21 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       <div class="prod-total-row"><span>Hoy:</span><strong>${formatCurrency(todayTotal)}</strong></div>
       <div class="prod-total-row"><span>${meses[new Date().getMonth()]}:</span><strong>${formatCurrency(monthTotal)}</strong></div>
     `;
+
+    // Update goal progress bar
+    const goalEl = panel.querySelector(".prod-goal");
+    if (goalEl) {
+      const pct = Math.min(100, Math.round((todayTotal / CONFIG.metaDiaria) * 100));
+      const fill = goalEl.querySelector(".prod-goal-fill");
+      const pctLabel = goalEl.querySelector(".prod-goal-pct");
+      const amounts = goalEl.querySelector(".prod-goal-amounts");
+      if (fill) {
+        fill.style.width = pct + "%";
+        fill.classList.toggle("goal-hit", pct >= 100);
+      }
+      if (pctLabel) pctLabel.textContent = pct + "%";
+      if (amounts) amounts.innerHTML = `<span>${formatCurrency(todayTotal)}</span><span>${formatCurrency(CONFIG.metaDiaria)}</span>`;
+    }
   }
 
   function ensureProductionPanel() {
@@ -764,6 +800,11 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       <div class="prod-body">
         <div class="prod-items"></div>
         <div class="prod-totals"></div>
+        <div class="prod-goal">
+          <div class="prod-goal-label"><span>Meta diaria</span><span class="prod-goal-pct">0%</span></div>
+          <div class="prod-goal-bar"><div class="prod-goal-fill" style="width:0%"></div></div>
+          <div class="prod-goal-amounts"><span>$0</span><span>$3.000.000</span></div>
+        </div>
         <div class="prod-actions">
           <button type="button" class="prod-btn" data-action="edit-prices">⚙ Precios</button>
           <button type="button" class="prod-btn" data-action="sync-now">☁ Sincronizar</button>
@@ -995,7 +1036,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   async function syncToGist() {
     const token = getGistToken();
     if (!token) return;
-    const gistId = getGistId();
+    let gistId = await ensureGistId(token);
     const payload = JSON.stringify(buildGistPayload(), null, 2);
 
     try {
@@ -1021,10 +1062,32 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     } catch (_) { /* silent fail */ }
   }
 
+  // Auto-descubrimiento: busca el gist por nombre de archivo
+  async function findGistByFilename(token) {
+    try {
+      const res = await fetch("https://api.github.com/gists?per_page=100", {
+        headers: { Authorization: `token ${token}` }
+      });
+      const gists = await res.json();
+      if (!Array.isArray(gists)) return null;
+      const found = gists.find((g) => g.files && g.files[GIST_FILENAME]);
+      return found ? found.id : null;
+    } catch (_) { return null; }
+  }
+
+  async function ensureGistId(token) {
+    let gistId = getGistId();
+    if (gistId) return gistId;
+    gistId = await findGistByFilename(token);
+    if (gistId) { setGistId(gistId); return gistId; }
+    return null;
+  }
+
   async function syncFromGist() {
     const token = getGistToken();
-    const gistId = getGistId();
-    if (!token || !gistId) return;
+    if (!token) return;
+    let gistId = await ensureGistId(token);
+    if (!gistId) return;
 
     try {
       const res = await fetch(`https://api.github.com/gists/${gistId}`, {
@@ -1036,13 +1099,10 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
       const remote = JSON.parse(content);
       if (Array.isArray(remote.produccion)) {
-        const merged = mergeProduccion(getProduccionLog(), remote.produccion);
-        saveProduccionLog(merged);
+        saveProduccionLog(mergeProduccion(getProduccionLog(), remote.produccion));
       }
       if (remote.precios && typeof remote.precios === "object") {
-        const localPrecios = getPrecios();
-        const mergedPrecios = { ...remote.precios, ...localPrecios };
-        localStorage.setItem(PRECIOS_KEY, JSON.stringify(mergedPrecios));
+        localStorage.setItem(PRECIOS_KEY, JSON.stringify({ ...remote.precios, ...getPrecios() }));
       }
     } catch (_) { /* silent fail */ }
   }
