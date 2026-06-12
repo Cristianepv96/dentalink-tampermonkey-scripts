@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - CUPS rapido orden de servicio
 // @namespace    https://odontofamily.local/dentalink-cups-quick-pick
-// @version      1.5.0
+// @version      1.5.1
 // @description  Muestra una lista discreta de códigos CUPS comunes e inserta el código en la orden de servicio.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -113,17 +113,18 @@
         display: block;
         width: 100%;
         margin: 0 0 2px;
-        padding: 3px 4px;
+        padding: 4px 5px;
         border: 0;
-        border-radius: 3px;
+        border-radius: 4px;
         background: transparent;
         cursor: pointer;
         text-align: left;
-        font: 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #1e293b;
         transition: background 0.15s;
       }
       #${PANEL_ID} button:hover {
-        background: rgba(15, 23, 42, 0.06);
+        background: rgba(15, 23, 42, 0.08);
       }
       #${PANEL_ID} .code {
         font-weight: 800;
@@ -133,8 +134,8 @@
         max-width: 130px;
         margin-left: 4px;
         overflow: hidden;
-        color: #64748b;
-        font-size: 10px;
+        color: #334155;
+        font-size: 10.5px;
         text-overflow: ellipsis;
         vertical-align: bottom;
         white-space: nowrap;

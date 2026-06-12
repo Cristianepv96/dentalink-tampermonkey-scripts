@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      1.5.1
+// @version      1.6.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -114,27 +114,8 @@
 
   function insertHtmlInEditor(editor, html) {
     editor.focus();
-    const selection = window.getSelection();
-
-    if (selection && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-
-      if (editor.contains(range.commonAncestorContainer)) {
-        range.deleteContents();
-        const fragment = range.createContextualFragment(html);
-        const lastNode = fragment.lastChild;
-        range.insertNode(fragment);
-
-        if (lastNode) {
-          range.setStartAfter(lastNode);
-          range.collapse(true);
-          selection.removeAllRanges();
-          selection.addRange(range);
-        }
-        return;
-      }
-    }
-
+    // Append via innerHTML — ProseMirror detects the DOM mutation
+    // and re-parses the content, preserving paragraph structure.
     editor.innerHTML += html;
   }
 
