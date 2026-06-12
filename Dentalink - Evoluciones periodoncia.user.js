@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.3.0
+// @version      2.3.1
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -43,9 +43,9 @@
       "Ajuste oclusal": 264675,
       "Drenaje": 165000,
       "Alargamiento": 105000,
-      "Detartraje": 0,
-      "Control": 0,
-      "Frenillectomía": 0
+      "Detartraje": 114000,
+      "Control": 34500,
+      "Frenillectomía": 172500
     },
 
     // porDiente: true → precio × nro dientes | false → precio × 1
@@ -1083,7 +1083,6 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
   function removePanel() {
     document.getElementById(PANEL_ID)?.remove();
-    closePrompt();
   }
 
   function ensurePanel() {
@@ -1105,6 +1104,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
   function schedulePanel() {
+    if (document.getElementById(MODAL_ID)) return; // No interferir con modales abiertos
     window.clearTimeout(schedulePanel.timer);
     schedulePanel.timer = window.setTimeout(() => {
       ensurePanel();
