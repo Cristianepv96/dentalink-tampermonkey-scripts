@@ -1,18 +1,21 @@
 // ==UserScript==
 // @name         Dentalink - Resumen periodontograma
 // @namespace    https://odontofamily.local/dentalink-periodontograma-resumen
-// @version      1.5.0
+// @version      1.6.0
 // @description  Genera resumen de bolsas periodontales, sangrado, movilidad y furca desde el periodontograma.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma-1.2.0.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma-1.2.0.user.js
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
 (function () {
   "use strict";
+
+  const { getPatientIdFromUrl, onUrlChange } = window.__dlkUtils;
 
   const PANEL_ID = "dlk-perio-resumen";
   const STYLE_ID = "dlk-perio-resumen-style";
@@ -24,9 +27,6 @@
     return TARGET_PATH.test(location.pathname);
   }
 
-  function getPatientIdFromUrl() {
-    return location.pathname.match(/\/pacientes\/(\d+)\b/i)?.[1] || "";
-  }
 
   function normalizeTooth(tooth) {
     return String(tooth || "").replace(/\D/g, "");
@@ -466,18 +466,6 @@
     handle.addEventListener("pointercancel", stopDrag);
   }
 
-  function watchUrlChanges(callback) {
-    const notify = () => window.setTimeout(callback, 100);
-    ["pushState", "replaceState"].forEach((method) => {
-      const original = history[method];
-      history[method] = function (...args) {
-        const result = original.apply(this, args);
-        notify();
-        return result;
-      };
-    });
-    window.addEventListener("popstate", notify);
-  }
 
   function schedulePanel() {
     window.clearTimeout(schedulePanel.timer);
@@ -509,7 +497,7 @@
   }
 
   purgeExpiredRecords();
-  watchUrlChanges(schedulePanel);
+  onUrlChange(schedulePanel);
   new MutationObserver(schedulePanel).observe(document.body, {
     childList: true,
     subtree: true

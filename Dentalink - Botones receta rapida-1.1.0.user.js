@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Botones receta rapida
 // @namespace    https://odontofamily.local/dentalink-recetas
-// @version      1.1.0
+// @version      1.2.0
 // @description  Agrega botones para insertar recetas predefinidas en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida-1.1.0.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida-1.1.0.user.js
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -14,16 +15,18 @@
 (function () {
   "use strict";
 
+  const { isVisible, escapeHtml, onUrlChange } = window.__dlkUtils;
+
   const PANEL_ID = "dlk-recetas-rapidas";
   const STYLE_ID = "dlk-recetas-rapidas-style";
   const TARGET_PATH = /\/pacientes\/\d+\/ficha\/recetas\b/i;
 
-  const RECETA_1 = [
+  const RECETA_NAP_AMOX = [
     "Amoxicilina 500mg #21 Tomar 1 cápsula cada 8 horas por 7 días.",
     "Naproxeno 500mg #9 Tomar 1 tableta cada 8 horas por 3 días."
   ];
 
-  const RECETA_3 = [
+  const RECETA_NAPROXENO = [
     "Naproxeno 500mg #9 Tomar 1 tableta cada 8 horas por 3 días."
   ];
 
@@ -31,28 +34,12 @@
     "Amoxicilina 500mg #21 Tomar 1 cápsula cada 8 horas por 7 días."
   ];
 
+  const RECETA_AZITROMICINA = [
+    "Azitromicina 500mg #3 Tomar 1 tableta cada 24 horas por 3 días."
+  ];
+
   function isRecetasPage() {
     return TARGET_PATH.test(location.pathname);
-  }
-
-  function isVisible(el) {
-    if (!el || !(el instanceof HTMLElement)) return false;
-    const style = window.getComputedStyle(el);
-    const rect = el.getBoundingClientRect();
-    return style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      Number(style.opacity) !== 0 &&
-      rect.width > 0 &&
-      rect.height > 0;
-  }
-
-  function escapeHtml(text) {
-    return String(text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
   }
 
   function linesToHtml(lines) {
@@ -181,9 +168,10 @@
       title.textContent = "Recetas rápidas:";
 
       panel.appendChild(title);
-      panel.appendChild(createButton("Nap + Amox", RECETA_1));
-      panel.appendChild(createButton("Naproxeno", RECETA_3));
+      panel.appendChild(createButton("Nap + Amox", RECETA_NAP_AMOX));
+      panel.appendChild(createButton("Naproxeno", RECETA_NAPROXENO));
       panel.appendChild(createButton("Amox", RECETA_AMOX));
+      panel.appendChild(createButton("Azitromicina", RECETA_AZITROMICINA));
     }
 
     if (panel.nextElementSibling !== anchor) {
@@ -191,25 +179,12 @@
     }
   }
 
-  function watchUrlChanges(callback) {
-    const notify = () => window.setTimeout(callback, 100);
-    ["pushState", "replaceState"].forEach((method) => {
-      const original = history[method];
-      history[method] = function (...args) {
-        const result = original.apply(this, args);
-        notify();
-        return result;
-      };
-    });
-    window.addEventListener("popstate", notify);
-  }
-
   function schedulePanel() {
     window.clearTimeout(schedulePanel.timer);
     schedulePanel.timer = window.setTimeout(ensurePanel, 150);
   }
 
-  watchUrlChanges(schedulePanel);
+  onUrlChange(schedulePanel);
   schedulePanel();
 
   const observer = new MutationObserver(schedulePanel);

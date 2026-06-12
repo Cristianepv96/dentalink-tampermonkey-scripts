@@ -1,18 +1,21 @@
 // ==UserScript==
 // @name         Dentalink - Antecedentes por defecto
 // @namespace    https://odontofamily.local/dentalink-antecedentes
-// @version      1.3.0
+// @version      1.4.0
 // @description  Rellena por defecto textareas especificos de antecedentes cuando estan vacios.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*/ficha/antecedentes*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto-1.3.0.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto-1.3.0.user.js
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
 (function () {
   "use strict";
+
+  const { isVisible, normalizeSpaces } = window.__dlkUtils;
 
   const DEFAULTS = [
     {
@@ -32,10 +35,6 @@
     }
   ];
 
-  function normalizeSpaces(text) {
-    return (text || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-  }
-
   function setNativeTextareaValue(textarea, value) {
     const setter = Object.getOwnPropertyDescriptor(
       window.HTMLTextAreaElement.prototype,
@@ -48,16 +47,6 @@
 
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
     textarea.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  function isVisible(el) {
-    if (!el || !(el instanceof HTMLElement)) return false;
-    const style = window.getComputedStyle(el);
-    const rect = el.getBoundingClientRect();
-    return style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      rect.width > 0 &&
-      rect.height > 0;
   }
 
   function nearestSectionText(textarea) {

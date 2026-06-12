@@ -1,18 +1,40 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      1.4.0
+// @version      1.5.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia-1.2.0.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia-1.2.0.user.js
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
 (function () {
   "use strict";
+
+  const { isVisible, escapeHtml, getPatientIdFromUrl, onUrlChange } = window.__dlkUtils;
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // CONFIGURACIÓN CLÍNICA (editar aquí los textos frecuentes)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const CONFIG = {
+    doctor: "Dr. Cristian Pena. Periodoncista.",
+    diagnostico: "K05.3 - Periodontitis crónica",
+    anestesia: {
+      farmaco: "Lidocaina 2% con epinefrina 1:80.000"
+    },
+    farmacologia: {
+      naproxeno: "Naproxeno 500mg tabletas #9 Tomar 1 tab cada 8 horas por 3 días. En caso de dolor no tolerable o indicación en posología."
+    },
+    sutura: "Seda 3.0 punto simple",
+    notaControles: "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal."
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════
 
   const PANEL_ID = "dlk-evo-periodoncia-panel";
   const MODAL_ID = "dlk-evo-periodoncia-modal";
@@ -35,10 +57,6 @@
     return TARGET_PATHS.some((path) => path.test(location.pathname));
   }
 
-  function getPatientIdFromUrl() {
-    return location.pathname.match(/\/pacientes\/(\d+)\b/i)?.[1] || "";
-  }
-
   function getSavedPeriodontalSummary() {
     const patientId = getPatientIdFromUrl();
     if (!patientId) return "";
@@ -51,29 +69,9 @@
     }
   }
 
-  function isVisible(el) {
-    if (!el || el.nodeType !== 1) return false;
-    const style = window.getComputedStyle(el);
-    const rect = el.getBoundingClientRect();
-    return style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      Number(style.opacity) !== 0 &&
-      rect.width > 0 &&
-      rect.height > 0;
-  }
-
   function getEditor() {
     return [...document.querySelectorAll(".tiptap.ProseMirror[contenteditable='true'], .ProseMirror[contenteditable='true'], [contenteditable='true']")]
       .find(isVisible) || null;
-  }
-
-  function escapeHtml(text) {
-    return String(text)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
   }
 
   function linesToHtml(text) {
@@ -112,6 +110,32 @@
     }
     editor.dispatchEvent(new Event("change", { bubbles: true }));
     editor.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+  }
+
+  function insertHtmlInEditor(editor, html) {
+    editor.focus();
+    const selection = window.getSelection();
+
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+
+      if (editor.contains(range.commonAncestorContainer)) {
+        range.deleteContents();
+        const fragment = range.createContextualFragment(html);
+        const lastNode = fragment.lastChild;
+        range.insertNode(fragment);
+
+        if (lastNode) {
+          range.setStartAfter(lastNode);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+        return;
+      }
+    }
+
+    editor.innerHTML += html;
   }
 
   function removeUndo() {
@@ -154,12 +178,8 @@
 
     const previousHtml = editor.innerHTML;
     const html = linesToHtml(text);
-    editor.focus();
 
-    if (!document.execCommand("insertHTML", false, html)) {
-      editor.innerHTML = `${editor.innerHTML}${html}`;
-    }
-
+    insertHtmlInEditor(editor, html);
     dispatchEditorEvents(editor, text);
     showUndoButton(editor, previousHtml);
   }
@@ -167,7 +187,7 @@
   function buildAlisadoCerradoText(values) {
     const duration = Number(values.duracion) || 45;
     const range = currentTimeRange(duration);
-    return `DIAGNÓSTICO: K05.3 - Periodontitis crónica
+    return `DIAGNÓSTICO: ${CONFIG.diagnostico}
 PROCEDIMIENTO: Raspado y Alisado Radicular (RAR) Campo Cerrado
 Dientes: ${values.dientes}
 HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
@@ -177,7 +197,7 @@ Hallazgos clínicos: Se observa presencia de cálculos supra y subgingivales, in
 Asepsia: Enjuague previo con clorhexidina al 0.12% para disminuir la carga bacteriana salival.
 
 ANESTESIA
-Farmaco: Lidocaina 2% con epinefrina 1:80.000 (${values.carpules} carpules en total).
+Farmaco: ${CONFIG.anestesia.farmaco} (${values.carpules} carpules en total).
 Técnica: ${values.tecnica}
 
 FASE DE DESBRIDAMIENTO (ULTRASONIDO)
@@ -198,22 +218,22 @@ Se verifica la ausencia de depósitos remanentes mediante exploración táctil.
 INDICACIONES Y EGRESO
 Egreso: Paciente finaliza el procedimiento en buenas condiciones generales, consciente, orientado y con hemostasia controlada.
 Farmacología:
-Naproxeno 500mg tabletas #9 Tomar 1 tab cada 8 horas por 3 días. En caso de dolor no tolerable o indicación en posología.
+${CONFIG.farmacologia.naproxeno}
 
 Recomendaciones:
 Instrucción en técnica de cepillado y uso de seda dental.
 Posible sensibilidad dental transitoria al frío/calor (se recomienda crema desensibilizante si es necesario).
 Uso de enjuague bucal con clorhexidina si se indicó.
 
-NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.
+${CONFIG.notaControles}
 
-ATENDIDO POR: Dr. Cristian Pena. Periodoncista.`;
+ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
   function buildAlisadoAbiertoText(values) {
     const duration = Number(values.duracion) || 60;
     const range = currentTimeRange(duration);
-    return `DIAGNÓSTICO: K05.3 - Periodontitis crónica
+    return `DIAGNÓSTICO: ${CONFIG.diagnostico}
 PROCEDIMIENTO: Raspado y Alisado Radicular (RAR) Campo Abierto.
 Dientes: ${values.dientes}
 HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
@@ -224,7 +244,7 @@ Hallazgos clínicos: Se observa inflamación persistente, cálculos subgingivale
 Asepsia: Enjuague previo con Gluconato de Clorhexidina al 0.12% y asepsia perioral.
 
 ANESTESIA
-Farmaco: Lidocaina 2% con epinefrina 1:80.000 (${values.carpules} carpules en total).
+Farmaco: ${CONFIG.anestesia.farmaco} (${values.carpules} carpules en total).
 Técnica: ${values.tecnica} para permitir una instrumentación profunda y cómoda para el paciente.
 
 FASE QUIRURGICA Y ACCESO (ALISADO ABIERTO)
@@ -242,7 +262,7 @@ Acción: Eliminación de cemento radicular contaminado y tejido de granulación 
 CIERRE Y FINALIZACION
 Lavado: Irrigación profusa con solución salina para eliminar detritos óseos y restos de cálculo.
 
-Sutura: Reposición del colgajo y cierre con Seda 3.0 punto simple.
+Sutura: Reposición del colgajo y cierre con ${CONFIG.sutura}.
 
 Profilaxis: Se complementa con limpieza de las superficies coronales para disminuir la carga bacteriana supragingival.
 
@@ -256,9 +276,9 @@ No cepillar la zona de la sutura (usar gel de clorhexidina).
 Dieta blanda, evitar esfuerzos físicos y exposición al sol.
 Cita para retiro de sutura en 8 días.
 
-NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.
+${CONFIG.notaControles}
 
-ATENDIDO POR: Dr. Cristian Pena. Periodoncista.`;
+ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
   function buildAlargamientoText(values) {
@@ -280,7 +300,7 @@ Consentimiento: El paciente firma y acepta el consentimiento informado, comprend
 Asepsia: Asepsia oral y perioral con Gluconato de Clorhexidina y colocación de campo estéril.
 
 ANESTESIA
-Farmaco: Lidocaina 2% con epinefrina 1:80.000 (2 carpules).
+Farmaco: ${CONFIG.anestesia.farmaco} (2 carpules).
 Técnica: ${values.tecnica}
 
 FASE QUIRURGICA (INCISION Y ABORDAJE)
@@ -297,14 +317,14 @@ Tratamiento Radicular: Raspado y alisado radicular con curetas Gracey para elimi
 
 SUTURA Y POSICIONAMIENTO
 Técnica: Reposicionamiento del colgajo de manera apical a la unión amelocementaria para ganar altura de corona clínica.
-Material: Sutura con Seda 3.0 punto simple
+Material: Sutura con ${CONFIG.sutura}
 
 PLAN DE MANEJO Y RECOMENDACIONES
 Egreso: Paciente estable, con hemostasia controlada.
 
 Recomendaciones: Reposo moderado (48h), dieta fría/blanda, no escupir, no fumar (15 días), higiene delicada en la zona sin cepillado traumático de la sutura. Cita para retiro de sutura en 8 días.
 
-ATENDIDO POR: Dr. Cristian Pena. Periodoncista.`;
+ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
   function buildValoracionText() {
@@ -315,7 +335,7 @@ ATENDIDO POR: Dr. Cristian Pena. Periodoncista.`;
 
 ${periodontalSummary}
 
-NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.
+${CONFIG.notaControles}
 
 Cita 20 min`;
     }
@@ -326,7 +346,7 @@ Se sugiere realizar
 
 Se solicita autorización para realizar:
 
-NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.
+${CONFIG.notaControles}
 
 Cita 20 min`;
   }
@@ -334,7 +354,7 @@ Cita 20 min`;
   function buildDetartrajeText(values) {
     const duration = Number(values.duracion) || 30;
     const range = currentTimeRange(duration);
-    return `DIAGNÓSTICO: K05.3 - Periodontitis crónica
+    return `DIAGNÓSTICO: ${CONFIG.diagnostico}
 PROCEDIMIENTO: Detartraje supragingival y subgingival.
 Dientes: ${values.dientes}
 HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
@@ -361,7 +381,9 @@ Instrucción en técnica de cepillado y uso de seda dental.
 Posible sensibilidad dental transitoria al frío/calor.
 Mantener controles periodontales según evolución clínica.
 
-ATENDIDO POR: Dr. Cristian Pena. Periodoncista.`;
+${CONFIG.notaControles}
+
+ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
   function ensureStyles() {
@@ -631,25 +653,12 @@ ATENDIDO POR: Dr. Cristian Pena. Periodoncista.`;
     }
   }
 
-  function watchUrlChanges(callback) {
-    const notify = () => window.setTimeout(callback, 100);
-    ["pushState", "replaceState"].forEach((method) => {
-      const original = history[method];
-      history[method] = function (...args) {
-        const result = original.apply(this, args);
-        notify();
-        return result;
-      };
-    });
-    window.addEventListener("popstate", notify);
-  }
-
   function schedulePanel() {
     window.clearTimeout(schedulePanel.timer);
     schedulePanel.timer = window.setTimeout(ensurePanel, 150);
   }
 
-  watchUrlChanges(schedulePanel);
+  onUrlChange(schedulePanel);
   new MutationObserver(schedulePanel).observe(document.body, {
     childList: true,
     subtree: true
