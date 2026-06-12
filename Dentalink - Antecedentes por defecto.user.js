@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Dentalink - Antecedentes por defecto
 // @namespace    https://odontofamily.local/dentalink-antecedentes
-// @version      1.4.0
+// @version      1.4.1
 // @description  Rellena por defecto textareas especificos de antecedentes cuando estan vacios.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*/ficha/antecedentes*
-// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto-1.3.0.user.js
-// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto-1.3.0.user.js
+// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js
+// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js
 // @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @grant        none
 // @run-at       document-idle

@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Dentalink - CUPS rapido orden de servicio
 // @namespace    https://odontofamily.local/dentalink-cups-quick-pick
-// @version      1.4.0
+// @version      1.4.1
 // @description  Muestra una lista discreta de códigos CUPS comunes e inserta el código en la orden de servicio.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
-// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20CUPS%20rapido%20orden%20de%20servicio-1.3.0.user.js
-// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20CUPS%20rapido%20orden%20de%20servicio-1.3.0.user.js
+// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20CUPS%20rapido%20orden%20de%20servicio.user.js
+// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20CUPS%20rapido%20orden%20de%20servicio.user.js
 // @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @run-at       document-idle
 // ==/UserScript==

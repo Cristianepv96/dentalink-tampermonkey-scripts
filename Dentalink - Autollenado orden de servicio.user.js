@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Dentalink - Autollenado orden de servicio
 // @namespace    https://odontofamily.local/dentalink-orden-servicio
-// @version      1.3.0
+// @version      1.3.1
 // @description  Rellena automaticamente campos base de la orden de servicio en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
-// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio-1.2.0.user.js
-// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio-1.2.0.user.js
+// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js
+// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js
 // @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @run-at       document-idle
 // ==/UserScript==

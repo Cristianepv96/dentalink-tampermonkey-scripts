@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         Dentalink - Botones receta rapida
 // @namespace    https://odontofamily.local/dentalink-recetas
-// @version      1.2.0
+// @version      1.2.1
 // @description  Agrega botones para insertar recetas predefinidas en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
-// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida-1.1.0.user.js
-// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida-1.1.0.user.js
+// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js
+// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js
 // @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @grant        none
 // @run-at       document-idle
