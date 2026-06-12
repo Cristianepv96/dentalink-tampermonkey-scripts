@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - CUPS rapido orden de servicio
 // @namespace    https://odontofamily.local/dentalink-cups-quick-pick
-// @version      1.4.1
+// @version      1.5.0
 // @description  Muestra una lista discreta de códigos CUPS comunes e inserta el código en la orden de servicio.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -18,39 +18,35 @@
 
   const PANEL_ID = "dlk-cups-quick-pick";
   const STYLE_ID = "dlk-cups-quick-pick-style";
-  const PANEL_VERSION = "1.4.0";
+  const PANEL_VERSION = "1.5.0";
   const TARGET_PATH = /\/pacientes\/\d+\/ficha\/formularios\/nuevo\/35\b/i;
 
   const CUPS_GROUPS = [
     {
-      title: "COMUNES",
-      color: "#6d28d9",
-      bg: "#f5f3ff",
+      title: "PERIODONCIA",
+      color: "#0f766e",
+      bg: "#f0fdfa",
       items: [
-        ["890221", "Consulta primera vez periodoncia"],
-        ["890321", "Control periodoncia"],
-        ["242201", "Curetaje / alisado radicular campo abierto"]
-      ]
-    },
-    {
-      title: "SAVIA SALUD",
-      color: "#1d4ed8",
-      bg: "#eff6ff",
-      items: [
-        ["240301", "Alisado radicular"],
-        ["240401", "Drenaje periodontal"],
+        ["890221", "Consulta primera vez perio"],
+        ["890321", "Consulta control perio"],
+        ["242201", "Campo abierto"],
+        ["240301", "Campo cerrado"],
+        ["240401", "Drenaje"],
+        ["240201", "Detartraje sub."],
         ["248201", "Ajuste oclusal"],
-        ["242301", "Aumento corona clínica"]
+        ["242301", "Alargamiento de corona"],
+        ["274101", "Frenillectomía"]
       ]
     },
     {
-      title: "FOMAG",
-      color: "#047857",
-      bg: "#ecfdf5",
+      title: "INTERCONSULTAS",
+      color: "#b45309",
+      bg: "#fffbeb",
       items: [
-        ["36100", "Consulta especializada periodoncia"],
-        ["240201", "Detartraje subgingival"],
-        ["893109", "Examen mucosa oral y periodontal"]
+        ["890219", "Consulta estoma-ciru"],
+        ["890236", "Consulta maxilo"],
+        ["890218", "Consulta endo"],
+        ["890224", "Consulta rehabi"]
       ]
     }
   ];
