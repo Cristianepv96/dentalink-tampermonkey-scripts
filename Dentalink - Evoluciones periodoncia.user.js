@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.4.0
+// @version      2.4.2
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -732,7 +732,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       #${MODAL_ID} .cancel { background: #e2e8f0; color: #334155; }
       #${MODAL_ID} .insert { background: #0284c7; color: #fff; }
       #${PROD_PANEL_ID} {
-        width: 150px; padding: 6px;
+        width: 150px; padding: 5px;
         border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 6px;
         background: rgba(255, 255, 255, 0.97); box-shadow: 0 3px 10px rgba(15, 23, 42, 0.10);
         font: 9px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -740,7 +740,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       #${PROD_PANEL_ID}.is-minimized .prod-body { display: none; }
       #${PROD_PANEL_ID} .prod-title {
         display: flex; justify-content: space-between; align-items: center;
-        margin-bottom: 4px; font-weight: 800; color: #334155; font-size: 10px; cursor: default;
+        margin-bottom: 3px; font-weight: 800; color: #334155; font-size: 10px; cursor: default;
       }
       #${PROD_PANEL_ID}.is-minimized .prod-title { margin-bottom: 0; }
       #${PROD_PANEL_ID} .prod-minimize {
@@ -762,14 +762,14 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       #${PROD_PANEL_ID} .prod-item-del:hover { background: #fee2e2; color: #dc2626; }
       #${PROD_PANEL_ID} .prod-empty { color: #94a3b8; font-style: italic; padding: 2px 0; }
       #${PROD_PANEL_ID} .prod-totals {
-        margin-top: 3px; padding-top: 3px; border-top: 1px solid #e2e8f0;
+        margin-top: 2px; padding-top: 2px; border-top: 1px solid #e2e8f0;
       }
       #${PROD_PANEL_ID} .prod-total-row {
-        display: flex; justify-content: space-between; padding: 1px 0; font-size: 10px;
+        display: flex; justify-content: space-between; padding: 0; font-size: 10px;
       }
       #${PROD_PANEL_ID} .prod-total-row strong { color: #0f766e; }
       #${PROD_PANEL_ID} .prod-actions {
-        display: flex; gap: 3px; margin-top: 5px;
+        display: flex; gap: 3px; margin-top: 3px;
       }
       #${PROD_PANEL_ID} .prod-btn {
         flex: 1; min-width: 0; padding: 3px 2px; border: 1px dashed #cbd5e1; border-radius: 3px;
@@ -779,10 +779,10 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       #${PROD_PANEL_ID} .prod-sync-ok { border-color: #86efac; color: #16a34a; }
       #${PROD_PANEL_ID} .prod-sync-err { border-color: #fca5a5; color: #dc2626; }
       #${PROD_PANEL_ID} .prod-goal {
-        margin-top: 5px; padding-top: 4px; border-top: 1px solid #e2e8f0;
+        margin-top: 3px; padding-top: 3px; border-top: 1px solid #e2e8f0;
       }
       #${PROD_PANEL_ID} .prod-goal-label {
-        display: flex; justify-content: space-between; font-size: 8px; color: #64748b; margin-bottom: 2px;
+        display: flex; justify-content: space-between; font-size: 8px; color: #64748b; margin-bottom: 1px;
       }
       #${PROD_PANEL_ID} .prod-goal-pct { font-weight: 800; color: #334155; }
       #${PROD_PANEL_ID} .prod-goal-bar {
@@ -796,7 +796,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
         background: linear-gradient(90deg, #22c55e, #10b981);
       }
       #${PROD_PANEL_ID} .prod-goal-amounts {
-        display: flex; justify-content: space-between; font-size: 7px; color: #94a3b8; margin-top: 1px;
+        display: none;
       }
     `;
     document.head.appendChild(style);
@@ -891,7 +891,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     ensureStyles();
     let panel = document.getElementById(PROD_PANEL_ID);
     if (panel) {
-      registerPanel(panel, { side: "right", vertical: "bottom", bottom: 8, order: 80 });
+      registerPanel(panel, { side: "right", vertical: "top", top: 168, order: 40 });
       updateProductionPanel();
       return;
     }
@@ -932,7 +932,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     });
 
     document.body.appendChild(panel);
-    registerPanel(panel, { side: "right", vertical: "bottom", bottom: 8, order: 80 });
+    registerPanel(panel, { side: "right", vertical: "top", top: 168, order: 40 });
     syncFromGist().then(() => updateProductionPanel());
     updateProductionPanel();
   }
