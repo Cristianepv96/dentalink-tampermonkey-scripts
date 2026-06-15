@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.3.2
+// @version      2.3.3
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -732,69 +732,71 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       #${MODAL_ID} .cancel { background: #e2e8f0; color: #334155; }
       #${MODAL_ID} .insert { background: #0284c7; color: #fff; }
       #${PROD_PANEL_ID} {
-        position: fixed; right: 10px; bottom: 10px; z-index: 999998; width: 230px; padding: 10px;
-        border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 8px;
-        background: rgba(255, 255, 255, 0.97); box-shadow: 0 4px 16px rgba(15, 23, 42, 0.10);
-        font: 11px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        position: fixed; right: 8px; bottom: 8px; z-index: 999998; width: 150px; padding: 6px;
+        border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 6px;
+        background: rgba(255, 255, 255, 0.97); box-shadow: 0 3px 10px rgba(15, 23, 42, 0.10);
+        font: 9px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
       #${PROD_PANEL_ID}.is-minimized .prod-body { display: none; }
       #${PROD_PANEL_ID} .prod-title {
         display: flex; justify-content: space-between; align-items: center;
-        margin-bottom: 8px; font-weight: 800; color: #334155; font-size: 12px; cursor: default;
+        margin-bottom: 4px; font-weight: 800; color: #334155; font-size: 10px; cursor: default;
       }
       #${PROD_PANEL_ID}.is-minimized .prod-title { margin-bottom: 0; }
       #${PROD_PANEL_ID} .prod-minimize {
-        width: 22px; height: 20px; padding: 0; border: 0; border-radius: 4px;
-        background: #e2e8f0; color: #334155; cursor: pointer; font-weight: 800; line-height: 1;
+        width: 16px; height: 15px; padding: 0; border: 0; border-radius: 3px;
+        background: #e2e8f0; color: #334155; cursor: pointer; font: 800 10px/1 sans-serif;
       }
       #${PROD_PANEL_ID} .prod-item {
-        display: flex; align-items: center; padding: 3px 0; color: #334155;
+        display: flex; align-items: center; padding: 1px 0; color: #334155;
       }
-      #${PROD_PANEL_ID} .prod-item-name { font-size: 11px; flex: 1; }
-      #${PROD_PANEL_ID} .prod-item-value { font-weight: 700; color: #0f766e; font-size: 11px; margin-right: 4px; }
+      #${PROD_PANEL_ID} .prod-item-name {
+        flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px;
+      }
+      #${PROD_PANEL_ID} .prod-item-value { font-weight: 700; color: #0f766e; font-size: 9px; margin-right: 2px; }
       #${PROD_PANEL_ID} .prod-item-del {
-        width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px;
-        background: transparent; color: #94a3b8; cursor: pointer; font: 700 13px/1 sans-serif;
+        width: 14px; height: 14px; padding: 0; border: 0; border-radius: 3px;
+        background: transparent; color: #94a3b8; cursor: pointer; font: 700 10px/1 sans-serif;
         flex-shrink: 0; transition: all 0.15s;
       }
       #${PROD_PANEL_ID} .prod-item-del:hover { background: #fee2e2; color: #dc2626; }
-      #${PROD_PANEL_ID} .prod-empty { color: #94a3b8; font-style: italic; padding: 4px 0; }
+      #${PROD_PANEL_ID} .prod-empty { color: #94a3b8; font-style: italic; padding: 2px 0; }
       #${PROD_PANEL_ID} .prod-totals {
-        margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0;
+        margin-top: 3px; padding-top: 3px; border-top: 1px solid #e2e8f0;
       }
       #${PROD_PANEL_ID} .prod-total-row {
-        display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px;
+        display: flex; justify-content: space-between; padding: 1px 0; font-size: 10px;
       }
       #${PROD_PANEL_ID} .prod-total-row strong { color: #0f766e; }
       #${PROD_PANEL_ID} .prod-actions {
-        display: flex; gap: 4px; margin-top: 8px;
+        display: flex; gap: 3px; margin-top: 5px;
       }
       #${PROD_PANEL_ID} .prod-btn {
-        flex: 1; padding: 5px; border: 1px dashed #cbd5e1; border-radius: 4px;
-        background: transparent; color: #64748b; cursor: pointer; font-size: 10px; text-align: center;
+        flex: 1; min-width: 0; padding: 3px 2px; border: 1px dashed #cbd5e1; border-radius: 3px;
+        background: transparent; color: #64748b; cursor: pointer; font-size: 8px; text-align: center;
       }
       #${PROD_PANEL_ID} .prod-btn:hover { background: #f1f5f9; color: #334155; }
       #${PROD_PANEL_ID} .prod-sync-ok { border-color: #86efac; color: #16a34a; }
       #${PROD_PANEL_ID} .prod-sync-err { border-color: #fca5a5; color: #dc2626; }
       #${PROD_PANEL_ID} .prod-goal {
-        margin-top: 8px; padding-top: 6px; border-top: 1px solid #e2e8f0;
+        margin-top: 5px; padding-top: 4px; border-top: 1px solid #e2e8f0;
       }
       #${PROD_PANEL_ID} .prod-goal-label {
-        display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-bottom: 4px;
+        display: flex; justify-content: space-between; font-size: 8px; color: #64748b; margin-bottom: 2px;
       }
       #${PROD_PANEL_ID} .prod-goal-pct { font-weight: 800; color: #334155; }
       #${PROD_PANEL_ID} .prod-goal-bar {
-        width: 100%; height: 8px; border-radius: 4px; background: #e2e8f0; overflow: hidden;
+        width: 100%; height: 5px; border-radius: 3px; background: #e2e8f0; overflow: hidden;
       }
       #${PROD_PANEL_ID} .prod-goal-fill {
-        height: 100%; border-radius: 4px; transition: width 0.4s ease, background 0.4s ease;
+        height: 100%; border-radius: 3px; transition: width 0.4s ease, background 0.4s ease;
         background: linear-gradient(90deg, #f97316, #eab308);
       }
       #${PROD_PANEL_ID} .prod-goal-fill.goal-hit {
         background: linear-gradient(90deg, #22c55e, #10b981);
       }
       #${PROD_PANEL_ID} .prod-goal-amounts {
-        display: flex; justify-content: space-between; font-size: 9px; color: #94a3b8; margin-top: 2px;
+        display: flex; justify-content: space-between; font-size: 7px; color: #94a3b8; margin-top: 1px;
       }
     `;
     document.head.appendChild(style);
@@ -894,7 +896,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     panel.id = PROD_PANEL_ID;
     panel.innerHTML = `
       <div class="prod-title">
-        <span>📊 Producción</span>
+        <span>📊 Prod.</span>
         <button type="button" class="prod-minimize" data-action="prod-minimize" title="Minimizar">−</button>
       </div>
       <div class="prod-body">
@@ -906,8 +908,8 @@ ATENDIDO POR: ${CONFIG.doctor}`;
           <div class="prod-goal-amounts"><span>$0</span><span>$3.000.000</span></div>
         </div>
         <div class="prod-actions">
-          <button type="button" class="prod-btn" data-action="edit-prices">⚙ Precios</button>
-          <button type="button" class="prod-btn" data-action="sync-now">☁ Sincronizar</button>
+          <button type="button" class="prod-btn" data-action="edit-prices">⚙ Precio</button>
+          <button type="button" class="prod-btn" data-action="sync-now">☁ Sync</button>
         </div>
       </div>
     `;
@@ -1232,21 +1234,21 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       setGistToken(newToken.trim());
     }
 
-    btn.textContent = "⏳ Sincronizando...";
+    btn.textContent = "⏳ ...";
     btn.disabled = true;
     try {
       await syncFromGist();
       await syncToGist();
       updateProductionPanel();
-      btn.textContent = "✅ Sincronizado";
+      btn.textContent = "✅ OK";
       btn.classList.add("prod-sync-ok");
     } catch (_) {
-      btn.textContent = "❌ Error";
+      btn.textContent = "❌ Err";
       btn.classList.add("prod-sync-err");
     }
     btn.disabled = false;
     setTimeout(() => {
-      btn.textContent = "☁ Sincronizar";
+      btn.textContent = "☁ Sync";
       btn.classList.remove("prod-sync-ok", "prod-sync-err");
     }, 3000);
   }
