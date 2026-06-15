@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Utils (base compartida)
 // @namespace    https://odontofamily.local/dentalink-utils
-// @version      1.1.0
+// @version      1.1.1
 // @description  Utilidades compartidas para los scripts de Dentalink. No activar manualmente.
 // @author       Cris
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
@@ -204,6 +204,20 @@
     panel.style.bottom = vertical === "bottom" ? `${options.bottom ?? margin}px` : "auto";
   }
 
+  function panelOptionsFromDataset(panel) {
+    return {
+      side: panel.dataset.dlkPanelSide || "right",
+      vertical: panel.dataset.dlkPanelVertical || "top",
+      top: Number(panel.dataset.dlkPanelTop || 150),
+      bottom: Number(panel.dataset.dlkPanelBottom || 8),
+      order: Number(panel.dataset.dlkPanelOrder || 0),
+      gap: Number(panel.dataset.dlkPanelGap || 8),
+      margin: Number(panel.dataset.dlkPanelMargin || 8),
+      zIndex: Number(panel.dataset.dlkPanelZIndex || 0) || null,
+      persistKey: panel.dataset.dlkPanelPersistKey || ""
+    };
+  }
+
   function autoStackPanels() {
     const groups = new Map();
     panelRegistry.forEach((options, id) => {
@@ -212,6 +226,16 @@
       const key = `${options.side || "right"}:${options.vertical || "top"}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push({ panel, options });
+    });
+
+    document.querySelectorAll("[data-dlk-panel='1']").forEach((panel) => {
+      const options = panelOptionsFromDataset(panel);
+      if (!panel.id || !utils.isVisible(panel) || options.persistKey && readJson(options.persistKey)) return;
+      const key = `${options.side}:${options.vertical}`;
+      if (!groups.has(key)) groups.set(key, []);
+      if (!groups.get(key).some((item) => item.panel === panel)) {
+        groups.get(key).push({ panel, options });
+      }
     });
 
     groups.forEach((items) => {
@@ -227,7 +251,7 @@
         panel.style.right = side === "right" ? `${margin}px` : "auto";
         panel.style.top = vertical === "top" ? `${offset}px` : "auto";
         panel.style.bottom = vertical === "bottom" ? `${offset}px` : "auto";
-        panel.style.zIndex = String(options.zIndex ?? (999980 + (options.order || index)));
+        panel.style.zIndex = String(options.zIndex || (999980 + (options.order || index)));
         offset += panel.offsetHeight + (options.gap ?? 8);
       });
     });
@@ -284,6 +308,15 @@
     if (!panel?.id) return panel;
     panelRegistry.set(panel.id, options);
     panel.dataset.dlkPanel = "1";
+    panel.dataset.dlkPanelSide = options.side || "right";
+    panel.dataset.dlkPanelVertical = options.vertical || "top";
+    panel.dataset.dlkPanelTop = String(options.top ?? 150);
+    panel.dataset.dlkPanelBottom = String(options.bottom ?? 8);
+    panel.dataset.dlkPanelOrder = String(options.order ?? 0);
+    panel.dataset.dlkPanelGap = String(options.gap ?? 8);
+    panel.dataset.dlkPanelMargin = String(options.margin ?? 8);
+    if (options.zIndex) panel.dataset.dlkPanelZIndex = String(options.zIndex);
+    if (options.persistKey) panel.dataset.dlkPanelPersistKey = options.persistKey;
     applyPanelPosition(panel, options);
     enablePanelDrag(panel, options);
     window.setTimeout(autoStackPanels, 0);
