@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.0.1
+// @version      1.1.0
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -18,7 +18,7 @@
 (function () {
   "use strict";
 
-  const { normalizeSpaces, getPatientIdFromUrl, onUrlChange } = window.__dlkUtils;
+  const { normalizeSpaces, getPatientIdFromUrl, watchPage, registerPanel, unregisterPanel } = window.__dlkUtils;
 
   const PANEL_ID = "dlk-registro-sheets-panel";
   const STYLE_ID = "dlk-registro-sheets-style";
@@ -26,7 +26,6 @@
   const TARGET_DENTALINK = /\/pacientes\/\d+\/tratamiento\/\d+\b/i;
   const TARGET_SHEETS = /^https:\/\/docs\.google\.com\/spreadsheets\/d\//i;
   const PLAN_TITLE_RE = /^\d{2}[/-]\d{2}[/-]\d{4}\s+\S.+/;
-  let lastRenderedHref = "";
   const MONTHS = {
     enero: 1,
     febrero: 2,
@@ -279,9 +278,6 @@
     style.id = STYLE_ID;
     style.textContent = `
       #${PANEL_ID} {
-        position: fixed;
-        right: 10px;
-        z-index: 999999;
         width: 118px;
         background: #ffffff;
         color: #172033;
@@ -298,8 +294,6 @@
         opacity: 1;
         box-shadow: 0 6px 16px rgba(15, 23, 42, 0.16);
       }
-      #${PANEL_ID}.on-dentalink { top: 176px; }
-      #${PANEL_ID}.on-sheets { bottom: 68px; }
       #${PANEL_ID} .dlk-registro-title {
         font-weight: 800;
         margin-bottom: 3px;
@@ -350,6 +344,7 @@
 
   function removePanel() {
     document.getElementById(PANEL_ID)?.remove();
+    unregisterPanel(PANEL_ID);
   }
 
   function button(label, action, className = "") {
@@ -396,6 +391,7 @@
       panel.className = "on-dentalink";
       document.body.appendChild(panel);
     }
+    registerPanel(panel, { side: "right", vertical: "top", top: 176, order: 30 });
 
     const { summaryEl } = renderPanelShell(
       panel,
@@ -441,6 +437,7 @@
       panel.className = "on-sheets";
       document.body.appendChild(panel);
     }
+    registerPanel(panel, { side: "right", vertical: "bottom", bottom: 68, order: 70 });
 
     const duplicate = payload?.planId && visibleSheetHasPlan(payload.planId);
     renderPanelShell(
@@ -473,7 +470,6 @@
   }
 
   function render() {
-    lastRenderedHref = location.href;
     if (isDentalinkPlan()) {
       renderDentalinkPanel();
     } else if (isSheet()) {
@@ -488,10 +484,5 @@
   }
 
   scheduleRender();
-  onUrlChange(scheduleRender);
-  window.setInterval(() => {
-    const shouldExist = isDentalinkPlan() || isSheet();
-    if (shouldExist && (!document.getElementById(PANEL_ID) || lastRenderedHref !== location.href)) scheduleRender();
-    if (!shouldExist && document.getElementById(PANEL_ID)) removePanel();
-  }, 1500);
+  watchPage(scheduleRender, { delay: 150, always: true });
 })();

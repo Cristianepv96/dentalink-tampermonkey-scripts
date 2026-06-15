@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Autollenado orden de servicio
 // @namespace    https://odontofamily.local/dentalink-orden-servicio
-// @version      1.3.2
+// @version      1.4.0
 // @description  Rellena automaticamente campos base de la orden de servicio en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -14,7 +14,7 @@
 (function () {
   "use strict";
 
-  const { normalizeSpaces, normalizeKey, setNativeValue, dispatchControlEvents, getPatientIdFromUrl, onUrlChange } = window.__dlkUtils;
+  const { normalizeSpaces, normalizeKey, setNativeValue, dispatchControlEvents, getPatientIdFromUrl, watchPage } = window.__dlkUtils;
 
   const DEFAULTS = [
     { label: /^FECHA DE LA ORDEN:?$/, control: "input", value: today },
@@ -101,12 +101,5 @@
     }, 250);
   }
 
-  onUrlChange(scheduleAutofill);
-  scheduleAutofill();
-  window.setTimeout(autofill, 1000);
-
-  new MutationObserver(scheduleAutofill).observe(document.body, {
-    childList: true,
-    subtree: true
-  });
+  watchPage(scheduleAutofill, { delay: 250, always: true });
 })();

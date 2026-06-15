@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Antecedentes por defecto
 // @namespace    https://odontofamily.local/dentalink-antecedentes
-// @version      1.4.1
+// @version      1.5.0
 // @description  Rellena por defecto textareas especificos de antecedentes cuando estan vacios.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*/ficha/antecedentes*
@@ -15,7 +15,7 @@
 (function () {
   "use strict";
 
-  const { isVisible, normalizeSpaces } = window.__dlkUtils;
+  const { isVisible, normalizeSpaces, watchPage } = window.__dlkUtils;
 
   const DEFAULTS = [
     {
@@ -94,11 +94,5 @@
     }, 250);
   }
 
-  scheduleApply();
-
-  const observer = new MutationObserver(scheduleApply);
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true
-  });
+  watchPage(scheduleApply, { delay: 250, always: true });
 })();

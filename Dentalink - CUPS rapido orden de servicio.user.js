@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - CUPS rapido orden de servicio
 // @namespace    https://odontofamily.local/dentalink-cups-quick-pick
-// @version      1.5.2
+// @version      1.6.0
 // @description  Muestra una lista discreta de códigos CUPS comunes e inserta el código en la orden de servicio.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -14,11 +14,11 @@
 (function () {
   "use strict";
 
-  const { normalizeKey, setNativeValue, onUrlChange } = window.__dlkUtils;
+  const { normalizeKey, setNativeValue, watchPage, registerPanel, unregisterPanel } = window.__dlkUtils;
 
   const PANEL_ID = "dlk-cups-quick-pick";
   const STYLE_ID = "dlk-cups-quick-pick-style";
-  const PANEL_VERSION = "1.5.2";
+  const PANEL_VERSION = "1.6.0";
   const TARGET_PATH = /\/pacientes\/\d+\/ficha\/formularios\/nuevo\/35\b/i;
 
   const CUPS_GROUPS = [
@@ -82,10 +82,6 @@
     style.id = STYLE_ID;
     style.textContent = `
       #${PANEL_ID} {
-        position: fixed;
-        left: 10px;
-        top: 152px;
-        z-index: 999998;
         width: 210px;
         padding: 8px;
         border: 1px solid rgba(15, 23, 42, 0.12);
@@ -142,8 +138,6 @@
       }
       @media (max-width: 1100px) {
         #${PANEL_ID} {
-          top: auto;
-          bottom: 88px;
           width: 180px;
           opacity: 0.92;
         }
@@ -155,18 +149,23 @@
   function ensurePanel() {
     if (!isTargetPage()) {
       document.getElementById(PANEL_ID)?.remove();
+      unregisterPanel(PANEL_ID);
       return;
     }
 
     if (!findCupsInput()) {
       document.getElementById(PANEL_ID)?.remove();
+      unregisterPanel(PANEL_ID);
       return;
     }
 
     ensureStyles();
 
     const existingPanel = document.getElementById(PANEL_ID);
-    if (existingPanel?.dataset.version === PANEL_VERSION) return;
+    if (existingPanel?.dataset.version === PANEL_VERSION) {
+      registerPanel(existingPanel, { side: "left", vertical: "top", top: 152, order: 20 });
+      return;
+    }
     existingPanel?.remove();
 
     const panel = document.createElement("div");
@@ -215,6 +214,7 @@
     });
 
     document.body.appendChild(panel);
+    registerPanel(panel, { side: "left", vertical: "top", top: 152, order: 20 });
   }
 
   function schedulePanel() {
@@ -225,10 +225,5 @@
     }, 150);
   }
 
-  onUrlChange(schedulePanel);
-  new MutationObserver(schedulePanel).observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-  schedulePanel();
+  watchPage(schedulePanel, { delay: 150, always: true });
 })();

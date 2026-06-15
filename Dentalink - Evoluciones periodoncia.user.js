@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.3.3
+// @version      2.4.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -16,7 +16,7 @@
 (function () {
   "use strict";
 
-  const { isVisible, escapeHtml, getPatientIdFromUrl, onUrlChange } = window.__dlkUtils;
+  const { isVisible, escapeHtml, getPatientIdFromUrl, watchPage, registerPanel } = window.__dlkUtils;
 
   // ═══════════════════════════════════════════════════════════════════════
   // CONFIGURACIÓN CLÍNICA (editar aquí los textos y precios frecuentes)
@@ -732,7 +732,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       #${MODAL_ID} .cancel { background: #e2e8f0; color: #334155; }
       #${MODAL_ID} .insert { background: #0284c7; color: #fff; }
       #${PROD_PANEL_ID} {
-        position: fixed; right: 8px; bottom: 8px; z-index: 999998; width: 150px; padding: 6px;
+        width: 150px; padding: 6px;
         border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 6px;
         background: rgba(255, 255, 255, 0.97); box-shadow: 0 3px 10px rgba(15, 23, 42, 0.10);
         font: 9px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -890,7 +890,11 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   function ensureProductionPanel() {
     ensureStyles();
     let panel = document.getElementById(PROD_PANEL_ID);
-    if (panel) { updateProductionPanel(); return; }
+    if (panel) {
+      registerPanel(panel, { side: "right", vertical: "bottom", bottom: 8, order: 80 });
+      updateProductionPanel();
+      return;
+    }
 
     panel = document.createElement("div");
     panel.id = PROD_PANEL_ID;
@@ -928,6 +932,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     });
 
     document.body.appendChild(panel);
+    registerPanel(panel, { side: "right", vertical: "bottom", bottom: 8, order: 80 });
     syncFromGist().then(() => updateProductionPanel());
     updateProductionPanel();
   }
@@ -1258,7 +1263,5 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   // ═══════════════════════════════════════════════════════════════════════
 
   purgeOldProduction();
-  onUrlChange(schedulePanel);
-  new MutationObserver(schedulePanel).observe(document.body, { childList: true, subtree: true });
-  schedulePanel();
+  watchPage(schedulePanel, { delay: 150, always: true });
 })();

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Resumen periodontograma
 // @namespace    https://odontofamily.local/dentalink-periodontograma-resumen
-// @version      1.6.2
+// @version      1.7.0
 // @description  Genera resumen de bolsas periodontales, sangrado, movilidad y furca desde el periodontograma.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -15,7 +15,7 @@
 (function () {
   "use strict";
 
-  const { getPatientIdFromUrl, onUrlChange } = window.__dlkUtils;
+  const { getPatientIdFromUrl, watchPage, registerPanel, unregisterPanel } = window.__dlkUtils;
 
   const PANEL_ID = "dlk-perio-resumen";
   const STYLE_ID = "dlk-perio-resumen-style";
@@ -273,10 +273,6 @@
     style.id = STYLE_ID;
     style.textContent = `
       #${PANEL_ID} {
-        position: fixed;
-        left: 10px;
-        top: 154px;
-        z-index: 999998;
         width: 220px;
         padding: 8px;
         border: 1px solid rgba(15, 23, 42, 0.14);
@@ -351,6 +347,7 @@
 
   function removePanel() {
     document.getElementById(PANEL_ID)?.remove();
+    unregisterPanel(PANEL_ID);
   }
 
   function ensurePanel() {
@@ -365,15 +362,21 @@
     }
 
     ensureStyles();
-    if (document.getElementById(PANEL_ID)) return;
+    const existingPanel = document.getElementById(PANEL_ID);
+    if (existingPanel) {
+      registerPanel(existingPanel, {
+        side: "left",
+        vertical: "top",
+        top: 154,
+        order: 10,
+        persistKey: POSITION_KEY,
+        dragHandleSelector: "[data-drag-handle]"
+      });
+      return;
+    }
 
     const panel = document.createElement("div");
     panel.id = PANEL_ID;
-    const position = getPanelPosition();
-    if (position && Number.isFinite(position.left) && Number.isFinite(position.top)) {
-      panel.style.left = `${position.left}px`;
-      panel.style.top = `${position.top}px`;
-    }
     panel.innerHTML = `
       <div class="title" data-drag-handle>
         <span>Resumen periodontograma</span>
@@ -423,9 +426,16 @@
         });
       }
     });
-    enableDrag(panel);
 
     document.body.appendChild(panel);
+    registerPanel(panel, {
+      side: "left",
+      vertical: "top",
+      top: 154,
+      order: 10,
+      persistKey: POSITION_KEY,
+      dragHandleSelector: "[data-drag-handle]"
+    });
   }
 
   function enableDrag(panel) {
@@ -500,10 +510,5 @@
   }
 
   purgeExpiredRecords();
-  onUrlChange(schedulePanel);
-  new MutationObserver(schedulePanel).observe(document.body, {
-    childList: true,
-    subtree: true
-  });
-  schedulePanel();
+  watchPage(schedulePanel, { delay: 150, always: true });
 })();
