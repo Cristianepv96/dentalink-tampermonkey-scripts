@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.0.0
+// @version      1.0.1
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
-// @match        https://*.dentalink.cl/pacientes/*/tratamiento/*
+// @match        https://*.dentalink.cl/pacientes/*
 // @match        https://docs.google.com/spreadsheets/d/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Registro%20diario%20a%20Google%20Sheets.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Registro%20diario%20a%20Google%20Sheets.user.js
@@ -25,6 +25,8 @@
   const STORAGE_KEY = "dlk_registro_sheets_payload_v1";
   const TARGET_DENTALINK = /\/pacientes\/\d+\/tratamiento\/\d+\b/i;
   const TARGET_SHEETS = /^https:\/\/docs\.google\.com\/spreadsheets\/d\//i;
+  const PLAN_TITLE_RE = /^\d{2}[/-]\d{2}[/-]\d{4}\s+\S.+/;
+  let lastRenderedHref = "";
   const MONTHS = {
     enero: 1,
     febrero: 2,
@@ -69,7 +71,7 @@
   }
 
   function parsePlanDate(title) {
-    const match = normalizeSpaces(title).match(/\b(\d{2})-(\d{2})-(\d{4})\b/);
+    const match = normalizeSpaces(title).match(/\b(\d{2})[/-](\d{2})[/-](\d{4})\b/);
     if (!match) return null;
     return {
       day: Number(match[1]),
@@ -115,7 +117,12 @@
   }
 
   function findPlanTitle(allLines) {
-    return allLines.find((line) => /^\d{2}-\d{2}-\d{4}\s+/.test(line)) || "";
+    const heading = [...document.querySelectorAll("h1, h2, h3, .title, [class*='title'], [class*='nombre']")]
+      .map((element) => normalizeSpaces(element.innerText || element.textContent || ""))
+      .find((text) => PLAN_TITLE_RE.test(text));
+    if (heading) return heading.replace(/\s*[\uF000-\uF8FF]\s*$/g, "").trim();
+
+    return allLines.find((line) => PLAN_TITLE_RE.test(line)) || "";
   }
 
   function findSede(allLines) {
@@ -273,37 +280,44 @@
     style.textContent = `
       #${PANEL_ID} {
         position: fixed;
-        right: 14px;
+        right: 10px;
         z-index: 999999;
-        width: 168px;
+        width: 118px;
         background: #ffffff;
         color: #172033;
-        border: 1px solid #d6dde8;
-        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
-        border-radius: 8px;
-        padding: 8px;
-        font: 11px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        border: 1px solid #d7dee8;
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+        border-radius: 7px;
+        padding: 5px;
+        font: 9px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        opacity: 0.82;
+        transition: opacity 120ms ease, box-shadow 120ms ease;
       }
-      #${PANEL_ID}.on-dentalink { top: 182px; }
-      #${PANEL_ID}.on-sheets { bottom: 74px; }
+      #${PANEL_ID}:hover,
+      #${PANEL_ID}:focus-within {
+        opacity: 1;
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.16);
+      }
+      #${PANEL_ID}.on-dentalink { top: 176px; }
+      #${PANEL_ID}.on-sheets { bottom: 68px; }
       #${PANEL_ID} .dlk-registro-title {
         font-weight: 800;
-        margin-bottom: 6px;
+        margin-bottom: 3px;
         display: flex;
         justify-content: space-between;
-        gap: 6px;
+        gap: 4px;
       }
       #${PANEL_ID} .dlk-registro-summary {
         color: #475569;
-        margin-bottom: 6px;
+        margin-bottom: 4px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
       #${PANEL_ID} .dlk-registro-status {
         color: #64748b;
-        min-height: 28px;
-        margin-top: 6px;
+        min-height: 20px;
+        margin-top: 4px;
       }
       #${PANEL_ID} .dlk-registro-status.ok { color: #15803d; }
       #${PANEL_ID} .dlk-registro-status.warn { color: #b45309; }
@@ -313,14 +327,15 @@
         border: 1px solid #bfdbfe;
         background: #eff6ff;
         color: #1d4ed8;
-        border-radius: 6px;
-        padding: 5px 6px;
+        border-radius: 5px;
+        padding: 3px 4px;
         font-weight: 700;
         cursor: pointer;
+        font-size: 9px;
       }
       #${PANEL_ID} button:hover { background: #dbeafe; }
       #${PANEL_ID} button.secondary {
-        margin-top: 5px;
+        margin-top: 3px;
         border-color: #e2e8f0;
         background: #f8fafc;
         color: #334155;
@@ -385,15 +400,15 @@
     const { summaryEl } = renderPanelShell(
       panel,
       "on-dentalink",
-      "Registro diario",
+      "Hoja",
       `#${payload.planId || "-"}`,
-      `${payload.fecha || "Sin fecha"} · ${payload.hora || "--:--"} · ${payload.valor || "$0"}`
+      `${payload.fecha || "-"} · ${payload.hora || "--:--"}`
     );
-    const copyButton = button("Copiar fila", "copy");
-    const refreshButton = button("Actualizar datos", "refresh", "secondary");
+    const copyButton = button("Copiar", "copy");
+    const refreshButton = button("Refrescar", "refresh", "secondary");
     const statusEl = document.createElement("div");
     statusEl.className = "dlk-registro-status";
-    statusEl.textContent = "Listo para copiar a Sheets.";
+    statusEl.textContent = payload.tituloPlan || "Listo.";
     panel.append(copyButton, refreshButton, statusEl);
 
     panel.onclick = (event) => {
@@ -402,12 +417,12 @@
       payload = extractPayload();
       if (action === "refresh") {
         setStatus(panel, `Actualizado: ${payload.fecha || "-"} ${payload.hora || ""}`, "ok");
-        summaryEl.textContent = `${payload.fecha || "Sin fecha"} · ${payload.hora || "--:--"} · ${payload.valor || "$0"}`;
+        summaryEl.textContent = `${payload.fecha || "-"} · ${payload.hora || "--:--"}`;
         return;
       }
       savePayload(payload);
       copyPayload(payload);
-      setStatus(panel, `Fila copiada. Ve a Sheets y pega en la fila vacia.`, "ok");
+      setStatus(panel, "Copiado. Pega en Sheets.", "ok");
     };
   }
 
@@ -431,15 +446,15 @@
     renderPanelShell(
       panel,
       "on-sheets",
-      "Dentalink",
+      "Hoja",
       currentSheetCell() || "",
       payload ? `${payload.fecha || "-"} · #${payload.planId || "-"}` : "Sin fila copiada"
     );
-    const copyButton = button("Copiar fila", "copy");
+    const copyButton = button("Copiar", "copy");
     copyButton.disabled = !payload;
     const statusEl = document.createElement("div");
     statusEl.className = `dlk-registro-status ${duplicate ? "warn" : ""}`.trim();
-    statusEl.textContent = duplicate ? "Ese ID plan ya esta visible en la hoja." : "Despues pulsa Cmd+V en la celda activa.";
+    statusEl.textContent = duplicate ? "ID visible; revisa duplicado." : "Pulsa Cmd+V.";
     panel.append(copyButton, statusEl);
 
     panel.onclick = (event) => {
@@ -453,11 +468,12 @@
       copyPayload(latest);
       const cell = currentSheetCell();
       const warning = visibleSheetHasPlan(latest.planId) ? " ID plan visible; revisa duplicado." : "";
-      setStatus(panel, `Fila en portapapeles. Pega${cell ? ` en ${cell}` : ""} con Cmd+V.${warning}`, warning ? "warn" : "ok");
+      setStatus(panel, `Portapapeles listo${cell ? ` (${cell})` : ""}.${warning}`, warning ? "warn" : "ok");
     };
   }
 
   function render() {
+    lastRenderedHref = location.href;
     if (isDentalinkPlan()) {
       renderDentalinkPanel();
     } else if (isSheet()) {
@@ -473,4 +489,9 @@
 
   scheduleRender();
   onUrlChange(scheduleRender);
+  window.setInterval(() => {
+    const shouldExist = isDentalinkPlan() || isSheet();
+    if (shouldExist && (!document.getElementById(PANEL_ID) || lastRenderedHref !== location.href)) scheduleRender();
+    if (!shouldExist && document.getElementById(PANEL_ID)) removePanel();
+  }, 1500);
 })();
