@@ -1,5 +1,4 @@
 # 🦷 Dentalink - Scripts Tampermonkey
-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
 Scripts de [Tampermonkey](https://www.tampermonkey.net/) para automatizar tareas clínicas de periodoncia en [Dentalink](https://www.dentalink.cl/).
 
 ---

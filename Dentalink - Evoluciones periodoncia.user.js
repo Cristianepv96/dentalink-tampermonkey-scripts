@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.3.1
+// @version      2.3.2
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -1105,8 +1105,9 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
   function schedulePanel() {
     if (document.getElementById(MODAL_ID)) return; // No interferir con modales abiertos
-    window.clearTimeout(schedulePanel.timer);
+    if (schedulePanel.timer) return;
     schedulePanel.timer = window.setTimeout(() => {
+      schedulePanel.timer = null;
       ensurePanel();
       ensureProductionPanel();
     }, 150);

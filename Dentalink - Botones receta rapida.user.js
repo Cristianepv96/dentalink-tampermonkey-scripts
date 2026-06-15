@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Botones receta rapida
 // @namespace    https://odontofamily.local/dentalink-recetas
-// @version      1.2.1
+// @version      1.2.2
 // @description  Agrega botones para insertar recetas predefinidas en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -180,8 +180,11 @@
   }
 
   function schedulePanel() {
-    window.clearTimeout(schedulePanel.timer);
-    schedulePanel.timer = window.setTimeout(ensurePanel, 150);
+    if (schedulePanel.timer) return;
+    schedulePanel.timer = window.setTimeout(() => {
+      schedulePanel.timer = null;
+      ensurePanel();
+    }, 150);
   }
 
   onUrlChange(schedulePanel);

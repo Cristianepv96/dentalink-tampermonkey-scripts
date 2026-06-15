@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Resumen periodontograma
 // @namespace    https://odontofamily.local/dentalink-periodontograma-resumen
-// @version      1.6.1
+// @version      1.6.2
 // @description  Genera resumen de bolsas periodontales, sangrado, movilidad y furca desde el periodontograma.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -468,8 +468,11 @@
 
 
   function schedulePanel() {
-    window.clearTimeout(schedulePanel.timer);
-    schedulePanel.timer = window.setTimeout(ensurePanel, 150);
+    if (schedulePanel.timer) return;
+    schedulePanel.timer = window.setTimeout(() => {
+      schedulePanel.timer = null;
+      ensurePanel();
+    }, 150);
   }
 
   function purgeExpiredRecords() {

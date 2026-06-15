@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - CUPS rapido orden de servicio
 // @namespace    https://odontofamily.local/dentalink-cups-quick-pick
-// @version      1.5.1
+// @version      1.5.2
 // @description  Muestra una lista discreta de códigos CUPS comunes e inserta el código en la orden de servicio.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -18,7 +18,7 @@
 
   const PANEL_ID = "dlk-cups-quick-pick";
   const STYLE_ID = "dlk-cups-quick-pick-style";
-  const PANEL_VERSION = "1.5.0";
+  const PANEL_VERSION = "1.5.2";
   const TARGET_PATH = /\/pacientes\/\d+\/ficha\/formularios\/nuevo\/35\b/i;
 
   const CUPS_GROUPS = [
@@ -218,8 +218,11 @@
   }
 
   function schedulePanel() {
-    window.clearTimeout(schedulePanel.timer);
-    schedulePanel.timer = window.setTimeout(ensurePanel, 150);
+    if (schedulePanel.timer) return;
+    schedulePanel.timer = window.setTimeout(() => {
+      schedulePanel.timer = null;
+      ensurePanel();
+    }, 150);
   }
 
   onUrlChange(schedulePanel);
