@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Utils (base compartida)
 // @namespace    https://odontofamily.local/dentalink-utils
-// @version      1.1.1
+// @version      1.1.2
 // @description  Utilidades compartidas para los scripts de Dentalink. No activar manualmente.
 // @author       Cris
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
@@ -155,7 +155,7 @@
 
     if (intervalMs > 0) {
       window.setInterval(function () {
-        if (lastHref !== location.href || options.always) run();
+        if (lastHref !== location.href || options.isStale?.()) run();
       }, intervalMs);
     }
 
@@ -307,6 +307,7 @@
   utils.registerPanel = function (panel, options = {}) {
     if (!panel?.id) return panel;
     panelRegistry.set(panel.id, options);
+    const alreadyRegistered = panel.dataset.dlkPanel === "1";
     panel.dataset.dlkPanel = "1";
     panel.dataset.dlkPanelSide = options.side || "right";
     panel.dataset.dlkPanelVertical = options.vertical || "top";
@@ -317,7 +318,7 @@
     panel.dataset.dlkPanelMargin = String(options.margin ?? 8);
     if (options.zIndex) panel.dataset.dlkPanelZIndex = String(options.zIndex);
     if (options.persistKey) panel.dataset.dlkPanelPersistKey = options.persistKey;
-    applyPanelPosition(panel, options);
+    if (!alreadyRegistered) applyPanelPosition(panel, options);
     enablePanelDrag(panel, options);
     window.setTimeout(autoStackPanels, 0);
     return panel;

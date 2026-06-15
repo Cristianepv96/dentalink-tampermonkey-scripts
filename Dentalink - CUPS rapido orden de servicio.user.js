@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - CUPS rapido orden de servicio
 // @namespace    https://odontofamily.local/dentalink-cups-quick-pick
-// @version      1.6.0
+// @version      1.6.1
 // @description  Muestra una lista discreta de códigos CUPS comunes e inserta el código en la orden de servicio.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -225,5 +225,8 @@
     }, 150);
   }
 
-  watchPage(schedulePanel, { delay: 150, always: true });
+  watchPage(schedulePanel, {
+    delay: 150,
+    isStale: () => isTargetPage() && findCupsInput() && !document.getElementById(PANEL_ID)
+  });
 })();

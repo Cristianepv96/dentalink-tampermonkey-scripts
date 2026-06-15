@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Antecedentes por defecto
 // @namespace    https://odontofamily.local/dentalink-antecedentes
-// @version      1.5.0
+// @version      1.5.1
 // @description  Rellena por defecto textareas especificos de antecedentes cuando estan vacios.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*/ficha/antecedentes*
@@ -94,5 +94,5 @@
     }, 250);
   }
 
-  watchPage(scheduleApply, { delay: 250, always: true });
+  watchPage(scheduleApply, { delay: 250, interval: 0 });
 })();

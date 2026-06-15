@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.1.2
+// @version      1.1.3
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -484,5 +484,8 @@
   }
 
   scheduleRender();
-  watchPage(scheduleRender, { delay: 150, always: true });
+  watchPage(scheduleRender, {
+    delay: 150,
+    isStale: () => (isDentalinkPlan() || isSheet()) && !document.getElementById(PANEL_ID)
+  });
 })();
