@@ -1,25 +1,24 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.4.4
-// @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink con contador de producción.
+// @version      2.4.5
+// @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
 // @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
-// @grant        GM_getValue
-// @grant        GM_setValue
+// @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
 (function () {
   "use strict";
 
-  const { isVisible, escapeHtml, getPatientIdFromUrl, watchPage, registerPanel } = window.__dlkUtils;
+  const { isVisible, escapeHtml, getPatientIdFromUrl, watchPage } = window.__dlkUtils;
 
   // ═══════════════════════════════════════════════════════════════════════
-  // CONFIGURACIÓN CLÍNICA (editar aquí los textos y precios frecuentes)
+  // CONFIGURACIÓN CLÍNICA (editar aquí los textos frecuentes)
   // ═══════════════════════════════════════════════════════════════════════
 
   const CONFIG = {
@@ -32,34 +31,7 @@
       naproxeno: "Naproxeno 500mg tabletas #9 Tomar 1 tab cada 8 horas por 3 días. En caso de dolor no tolerable o indicación en posología."
     },
     sutura: "Seda 3.0 punto simple",
-    metaDiaria: 3000000,
-    notaControles: "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.",
-
-    // Precios por defecto (pesos colombianos). Se pueden editar desde el panel.
-    precios: {
-      "Valoración": 48375,
-      "Alisado cerrado": 122175,
-      "Alisado abierto": 145950,
-      "Ajuste oclusal": 264675,
-      "Drenaje": 165000,
-      "Alargamiento": 105000,
-      "Detartraje": 114000,
-      "Control": 34500,
-      "Frenillectomía": 172500
-    },
-
-    // porDiente: true → precio × nro dientes | false → precio × 1
-    procedimientos: {
-      "Valoración": { porDiente: false },
-      "Alisado cerrado": { porDiente: true },
-      "Alisado abierto": { porDiente: true },
-      "Ajuste oclusal": { porDiente: true },
-      "Drenaje": { porDiente: true },
-      "Alargamiento": { porDiente: true },
-      "Detartraje": { porDiente: true },
-      "Control": { porDiente: false },
-      "Frenillectomía": { porDiente: false }
-    }
+    notaControles: "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal."
   };
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -68,13 +40,7 @@
   const MODAL_ID = "dlk-evo-periodoncia-modal";
   const STYLE_ID = "dlk-evo-periodoncia-style";
   const UNDO_ID = "dlk-evo-periodoncia-undo";
-  const PROD_PANEL_ID = "dlk-produccion-panel";
   const PERIO_STORAGE_KEY = "dlk_periodontograma_resumen_v1";
-  const PRODUCCION_KEY = "dlk_produccion_v1";
-  const PRECIOS_KEY = "dlk_precios_v1";
-  const GIST_TOKEN_KEY = "dlk_gist_token";
-  const GIST_ID_KEY = "dlk_gist_id";
-  const GIST_FILENAME = "dentalink-produccion.json";
   const TARGET_PATHS = [
     /\/pacientes\/\d+\/tratamiento\/\d+\b/i,
     /\/pacientes\/\d+\/ficha\/evoluciones\b/i
@@ -147,111 +113,7 @@
     editor.innerHTML += html;
   }
 
-  // ─── Tooth counting ───
-
-  function countTeeth(dientesStr) {
-    if (!dientesStr || !dientesStr.trim()) return 0;
-    let count = 0;
-    const parts = dientesStr.replace(/\./g, "").split(",").map((s) => s.trim()).filter(Boolean);
-    for (const part of parts) {
-      if (part.includes("-")) {
-        const nums = part.split("-").map((s) => parseInt(s.trim(), 10));
-        if (nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1])) {
-          count += Math.abs(nums[1] - nums[0]) + 1;
-        }
-      } else {
-        if (!isNaN(parseInt(part, 10))) count += 1;
-      }
-    }
-    return count;
-  }
-
-  function formatCurrency(amount) {
-    return "$" + String(Math.round(amount)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  }
-
-  function toSlug(str) {
-    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "_").toLowerCase();
-  }
-
-  // ─── Price storage ───
-
-  function getPrecios() {
-    try {
-      const custom = JSON.parse(localStorage.getItem(PRECIOS_KEY) || "{}");
-      return { ...CONFIG.precios, ...custom };
-    } catch (_) { return { ...CONFIG.precios }; }
-  }
-
-  function savePrecio(tipo, precio) {
-    try {
-      const all = getPrecios();
-      all[tipo] = precio;
-      localStorage.setItem(PRECIOS_KEY, JSON.stringify(all));
-    } catch (_) { /* ignore */ }
-  }
-
-  // ─── Production log ───
-
-  function getProduccionLog() {
-    try { return JSON.parse(localStorage.getItem(PRODUCCION_KEY) || "[]"); }
-    catch (_) { return []; }
-  }
-
-  function saveProduccionLog(log) {
-    try { localStorage.setItem(PRODUCCION_KEY, JSON.stringify(log)); }
-    catch (_) { /* ignore */ }
-  }
-
-  function logProduction(tipo, cantidad, precioUnitario) {
-    const log = getProduccionLog();
-    const id = Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-    log.push({
-      id, tipo, cantidad, precioUnitario,
-      valorTotal: cantidad * precioUnitario,
-      fecha: new Date().toISOString().slice(0, 10),
-      timestamp: new Date().toISOString()
-    });
-    saveProduccionLog(log);
-    syncToGist();
-    return id;
-  }
-
-  function removeProduccionEntry(id) {
-    saveProduccionLog(getProduccionLog().filter((e) => e.id !== id));
-    syncToGist();
-  }
-
-  function purgeOldProduction() {
-    const cutoff = new Date();
-    cutoff.setFullYear(cutoff.getFullYear() - 1);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
-    const log = getProduccionLog().filter((e) => e.fecha >= cutoffStr);
-    saveProduccionLog(log);
-  }
-
-  function buildProductionSummary() {
-    const log = getProduccionLog();
-    const today = new Date().toISOString().slice(0, 10);
-    const month = today.slice(0, 7);
-
-    const todayEntries = log.filter((e) => e.fecha === today);
-    const monthEntries = log.filter((e) => e.fecha.startsWith(month));
-
-    const todayTotal = todayEntries.reduce((s, e) => s + e.valorTotal, 0);
-    const monthTotal = monthEntries.reduce((s, e) => s + e.valorTotal, 0);
-
-    const todayGroups = {};
-    todayEntries.forEach((e) => {
-      if (!todayGroups[e.tipo]) todayGroups[e.tipo] = { cantidad: 0, total: 0 };
-      todayGroups[e.tipo].cantidad += e.cantidad;
-      todayGroups[e.tipo].total += e.valorTotal;
-    });
-
-    return { todayGroups, todayTotal, monthTotal };
-  }
-
-  // ─── Insert with production tracking ───
+  // ─── Insert helpers ───
 
   function removeUndo() {
     document.getElementById(UNDO_ID)?.remove();
@@ -294,42 +156,6 @@
     dispatchEditorEvents(editor, text);
     showUndoButton(editor, previousHtml, onUndo);
     return true;
-  }
-
-  function handleInsertWithTracking(tipo, text, dientesStr) {
-    const precios = getPrecios();
-    let precio = precios[tipo];
-
-    if (precio === undefined || precio === 0) {
-      const perDiente = CONFIG.procedimientos[tipo]?.porDiente !== false;
-      const label = perDiente ? "por diente" : "por consulta";
-      const input = prompt(`¿Cuál es el valor de "${tipo}" ${label}?\n(Ingrese el valor en pesos sin puntos ni comas)`);
-      if (input === null) { insertText(text); return; }
-      precio = parseInt(input.replace(/\D/g, ""), 10);
-      if (isNaN(precio) || precio < 0) { insertText(text); return; }
-      savePrecio(tipo, precio);
-    }
-
-    const porDiente = CONFIG.procedimientos[tipo]?.porDiente !== false;
-    const cantidad = porDiente ? countTeeth(dientesStr) : 1;
-
-    if (cantidad === 0 && porDiente) {
-      insertText(text);
-      return;
-    }
-
-    const entry = { id: null };
-    const success = insertText(text, function () {
-      if (entry.id) {
-        removeProduccionEntry(entry.id);
-        updateProductionPanel();
-      }
-    });
-
-    if (success) {
-      entry.id = logProduction(tipo, cantidad, precio);
-      updateProductionPanel();
-    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -731,210 +557,8 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       #${MODAL_ID} button { border: 0; border-radius: 5px; cursor: pointer; font-weight: 700; padding: 8px 10px; }
       #${MODAL_ID} .cancel { background: #e2e8f0; color: #334155; }
       #${MODAL_ID} .insert { background: #0284c7; color: #fff; }
-      #${PROD_PANEL_ID} {
-        width: 150px; padding: 5px;
-        border: 1px solid rgba(15, 23, 42, 0.12); border-radius: 6px;
-        background: rgba(255, 255, 255, 0.97); box-shadow: 0 3px 10px rgba(15, 23, 42, 0.10);
-        font: 9px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-      #${PROD_PANEL_ID}.is-minimized .prod-body { display: none; }
-      #${PROD_PANEL_ID} .prod-title {
-        display: flex; justify-content: space-between; align-items: center;
-        margin-bottom: 3px; font-weight: 800; color: #334155; font-size: 10px; cursor: default;
-      }
-      #${PROD_PANEL_ID}.is-minimized .prod-title { margin-bottom: 0; }
-      #${PROD_PANEL_ID} .prod-minimize {
-        width: 16px; height: 15px; padding: 0; border: 0; border-radius: 3px;
-        background: #e2e8f0; color: #334155; cursor: pointer; font: 800 10px/1 sans-serif;
-      }
-      #${PROD_PANEL_ID} .prod-item {
-        display: flex; align-items: center; padding: 1px 0; color: #334155;
-      }
-      #${PROD_PANEL_ID} .prod-item-name {
-        flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px;
-      }
-      #${PROD_PANEL_ID} .prod-item-value { font-weight: 700; color: #0f766e; font-size: 9px; margin-right: 2px; }
-      #${PROD_PANEL_ID} .prod-item-del {
-        width: 14px; height: 14px; padding: 0; border: 0; border-radius: 3px;
-        background: transparent; color: #94a3b8; cursor: pointer; font: 700 10px/1 sans-serif;
-        flex-shrink: 0; transition: all 0.15s;
-      }
-      #${PROD_PANEL_ID} .prod-item-del:hover { background: #fee2e2; color: #dc2626; }
-      #${PROD_PANEL_ID} .prod-empty { color: #94a3b8; font-style: italic; padding: 2px 0; }
-      #${PROD_PANEL_ID} .prod-totals {
-        margin-top: 2px; padding-top: 2px; border-top: 1px solid #e2e8f0;
-      }
-      #${PROD_PANEL_ID} .prod-total-row {
-        display: flex; justify-content: space-between; padding: 0; font-size: 10px;
-      }
-      #${PROD_PANEL_ID} .prod-total-row strong { color: #0f766e; }
-      #${PROD_PANEL_ID} .prod-actions {
-        display: flex; gap: 3px; margin-top: 3px;
-      }
-      #${PROD_PANEL_ID} .prod-btn {
-        flex: 1; min-width: 0; padding: 3px 2px; border: 1px dashed #cbd5e1; border-radius: 3px;
-        background: transparent; color: #64748b; cursor: pointer; font-size: 8px; text-align: center;
-      }
-      #${PROD_PANEL_ID} .prod-btn:hover { background: #f1f5f9; color: #334155; }
-      #${PROD_PANEL_ID} .prod-sync-ok { border-color: #86efac; color: #16a34a; }
-      #${PROD_PANEL_ID} .prod-sync-err { border-color: #fca5a5; color: #dc2626; }
-      #${PROD_PANEL_ID} .prod-goal {
-        margin-top: 3px; padding-top: 3px; border-top: 1px solid #e2e8f0;
-      }
-      #${PROD_PANEL_ID} .prod-goal-label {
-        display: flex; justify-content: space-between; font-size: 8px; color: #64748b; margin-bottom: 1px;
-      }
-      #${PROD_PANEL_ID} .prod-goal-pct { font-weight: 800; color: #334155; }
-      #${PROD_PANEL_ID} .prod-goal-bar {
-        width: 100%; height: 5px; border-radius: 3px; background: #e2e8f0; overflow: hidden;
-      }
-      #${PROD_PANEL_ID} .prod-goal-fill {
-        height: 100%; border-radius: 3px; transition: width 0.4s ease, background 0.4s ease;
-        background: linear-gradient(90deg, #f97316, #eab308);
-      }
-      #${PROD_PANEL_ID} .prod-goal-fill.goal-hit {
-        background: linear-gradient(90deg, #22c55e, #10b981);
-      }
-      #${PROD_PANEL_ID} .prod-goal-amounts {
-        display: none;
-      }
     `;
     document.head.appendChild(style);
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // PRODUCTION PANEL UI
-  // ═══════════════════════════════════════════════════════════════════════
-
-  function removeLastEntryOfType(tipo) {
-    const log = getProduccionLog();
-    const today = new Date().toISOString().slice(0, 10);
-    // Find last entry of this type for today
-    for (let i = log.length - 1; i >= 0; i--) {
-      if (log[i].tipo === tipo && log[i].fecha === today) {
-        log.splice(i, 1);
-        saveProduccionLog(log);
-        syncToGist();
-        return;
-      }
-    }
-  }
-
-  function updateProductionPanel() {
-    const panel = document.getElementById(PROD_PANEL_ID);
-    if (!panel) return;
-
-    const { todayGroups, todayTotal, monthTotal } = buildProductionSummary();
-    const itemsEl = panel.querySelector(".prod-items");
-    const totalsEl = panel.querySelector(".prod-totals");
-    if (!itemsEl || !totalsEl) return;
-
-    // Build items with delete buttons
-    itemsEl.innerHTML = "";
-    const tipos = Object.keys(todayGroups);
-    if (tipos.length === 0) {
-      itemsEl.innerHTML = '<div class="prod-empty">Sin registros hoy</div>';
-    } else {
-      tipos.forEach((tipo) => {
-        const data = todayGroups[tipo];
-        const row = document.createElement("div");
-        row.className = "prod-item";
-
-        const nameSpan = document.createElement("span");
-        nameSpan.className = "prod-item-name";
-        nameSpan.textContent = `${tipo} ×${data.cantidad}`;
-
-        const valueSpan = document.createElement("span");
-        valueSpan.className = "prod-item-value";
-        valueSpan.textContent = formatCurrency(data.total);
-
-        const delBtn = document.createElement("button");
-        delBtn.type = "button";
-        delBtn.className = "prod-item-del";
-        delBtn.textContent = "−";
-        delBtn.title = `Quitar 1 ${tipo}`;
-        delBtn.addEventListener("click", () => {
-          removeLastEntryOfType(tipo);
-          updateProductionPanel();
-        });
-
-        row.appendChild(nameSpan);
-        row.appendChild(valueSpan);
-        row.appendChild(delBtn);
-        itemsEl.appendChild(row);
-      });
-    }
-
-    const meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-    totalsEl.innerHTML = `
-      <div class="prod-total-row"><span>Hoy:</span><strong>${formatCurrency(todayTotal)}</strong></div>
-      <div class="prod-total-row"><span>${meses[new Date().getMonth()]}:</span><strong>${formatCurrency(monthTotal)}</strong></div>
-    `;
-
-    // Update goal progress bar
-    const goalEl = panel.querySelector(".prod-goal");
-    if (goalEl) {
-      const pct = Math.min(100, Math.round((todayTotal / CONFIG.metaDiaria) * 100));
-      const fill = goalEl.querySelector(".prod-goal-fill");
-      const pctLabel = goalEl.querySelector(".prod-goal-pct");
-      const amounts = goalEl.querySelector(".prod-goal-amounts");
-      if (fill) {
-        fill.style.width = pct + "%";
-        fill.classList.toggle("goal-hit", pct >= 100);
-      }
-      if (pctLabel) pctLabel.textContent = pct + "%";
-      if (amounts) amounts.innerHTML = `<span>${formatCurrency(todayTotal)}</span><span>${formatCurrency(CONFIG.metaDiaria)}</span>`;
-    }
-  }
-
-  function ensureProductionPanel() {
-    ensureStyles();
-    let panel = document.getElementById(PROD_PANEL_ID);
-    if (panel) {
-      registerPanel(panel, { side: "right", vertical: "top", top: 168, order: 40 });
-      updateProductionPanel();
-      return;
-    }
-
-    panel = document.createElement("div");
-    panel.id = PROD_PANEL_ID;
-    panel.innerHTML = `
-      <div class="prod-title">
-        <span>📊 Prod.</span>
-        <button type="button" class="prod-minimize" data-action="prod-minimize" title="Minimizar">−</button>
-      </div>
-      <div class="prod-body">
-        <div class="prod-items"></div>
-        <div class="prod-totals"></div>
-        <div class="prod-goal">
-          <div class="prod-goal-label"><span>Meta diaria</span><span class="prod-goal-pct">0%</span></div>
-          <div class="prod-goal-bar"><div class="prod-goal-fill" style="width:0%"></div></div>
-          <div class="prod-goal-amounts"><span>$0</span><span>$3.000.000</span></div>
-        </div>
-        <div class="prod-actions">
-          <button type="button" class="prod-btn" data-action="edit-prices">⚙ Precio</button>
-          <button type="button" class="prod-btn" data-action="sync-now">☁ Sync</button>
-        </div>
-      </div>
-    `;
-
-    panel.addEventListener("click", (event) => {
-      const action = event.target.closest("[data-action]")?.dataset.action;
-      if (!action) return;
-      if (action === "prod-minimize") {
-        panel.classList.toggle("is-minimized");
-        const btn = event.target.closest("button");
-        btn.textContent = panel.classList.contains("is-minimized") ? "+" : "−";
-        btn.title = panel.classList.contains("is-minimized") ? "Expandir" : "Minimizar";
-      }
-      if (action === "edit-prices") openPriceEditor();
-      if (action === "sync-now") handleSyncButton(event.target.closest("button"));
-    });
-
-    document.body.appendChild(panel);
-    registerPanel(panel, { side: "right", vertical: "top", top: 168, order: 40 });
-    syncFromGist().then(() => updateProductionPanel());
-    updateProductionPanel();
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -989,25 +613,6 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     modal.querySelector("input")?.focus();
   }
 
-  function openPriceEditor() {
-    const precios = getPrecios();
-    const tipos = Object.keys(CONFIG.procedimientos);
-    const fields = tipos.map((tipo) => ({
-      name: toSlug(tipo),
-      label: `${tipo}${CONFIG.procedimientos[tipo].porDiente ? " (por diente)" : " (por consulta)"}`,
-      value: String(precios[tipo] || 0)
-    }));
-
-    openFormPrompt("Editar precios (COP)", fields, (values) => {
-      tipos.forEach((tipo) => {
-        const raw = values[toSlug(tipo)] || "0";
-        const precio = parseInt(raw.replace(/\D/g, ""), 10);
-        if (!isNaN(precio)) savePrecio(tipo, precio);
-      });
-      updateProductionPanel();
-    });
-  }
-
   // ─── Prompt openers ───
 
   function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration) {
@@ -1016,7 +621,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       { name: "carpules", label: "Carpules en total", value: String(defaultCarpules) },
       { name: "tecnica", label: "Técnica anestésica", value: defaultTecnica },
       { name: "duracion", label: "Duración de la cita (minutos)", value: String(defaultDuration) }
-    ], (values) => handleInsertWithTracking(title, builder(values), values.dientes));
+    ], (values) => insertText(builder(values)));
   }
 
   function openAlargamientoPrompt() {
@@ -1025,26 +630,26 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       { name: "restauracion", label: "Restauración", value: "" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "60" }
-    ], (values) => handleInsertWithTracking("Alargamiento", buildAlargamientoText(values), values.diente));
+    ], (values) => insertText(buildAlargamientoText(values)));
   }
 
   function openDetartrajePrompt() {
     openFormPrompt("Detartraje", [
       { name: "dientes", label: "Dientes", value: "" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
-    ], (values) => handleInsertWithTracking("Detartraje", buildDetartrajeText(values), values.dientes));
+    ], (values) => insertText(buildDetartrajeText(values)));
   }
 
   function openAjusteOclusalPrompt() {
     openFormPrompt("Ajuste oclusal", [
       { name: "dientes", label: "Dientes", value: "" }
-    ], (values) => handleInsertWithTracking("Ajuste oclusal", buildAjusteOclusalText(values), values.dientes));
+    ], (values) => insertText(buildAjusteOclusalText(values)));
   }
 
   function openDrenajePrompt() {
     openFormPrompt("Drenaje periodontal", [
       { name: "dientes", label: "Dientes", value: "" }
-    ], (values) => handleInsertWithTracking("Drenaje", buildDrenajeText(values), values.dientes));
+    ], (values) => insertText(buildDrenajeText(values)));
   }
 
   function openFrenillectomiaPrompt() {
@@ -1053,7 +658,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       { name: "carpules", label: "Carpules en total", value: "1" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
-    ], (values) => handleInsertWithTracking("Frenillectomía", buildFrenillectomiaText(values), ""));
+    ], (values) => insertText(buildFrenillectomiaText(values)));
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -1062,7 +667,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
   function handleButton(label) {
     if (label === "Valoración") {
-      handleInsertWithTracking("Valoración", buildValoracionText(), "");
+      insertText(buildValoracionText());
       return;
     }
     if (label === "Alisado cerrado") { openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45); return; }
@@ -1071,7 +676,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     if (label === "Detartraje") { openDetartrajePrompt(); return; }
     if (label === "Ajuste oclusal") { openAjusteOclusalPrompt(); return; }
     if (label === "Drenaje") { openDrenajePrompt(); return; }
-    if (label === "Control") { handleInsertWithTracking("Control", buildControlText(), ""); return; }
+    if (label === "Control") { insertText(buildControlText()); return; }
     if (label === "Frenillectomía") { openFrenillectomiaPrompt(); return; }
     alert(`Boton "${label}" creado. Falta definir su texto.`);
   }
@@ -1116,156 +721,14 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     schedulePanel.timer = window.setTimeout(() => {
       schedulePanel.timer = null;
       ensurePanel();
-      ensureProductionPanel();
     }, 150);
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // GITHUB GIST SYNC (memoria compartida entre equipos)
-  // ═══════════════════════════════════════════════════════════════════════
-
-  function getGistToken() {
-    try { return GM_getValue(GIST_TOKEN_KEY, ""); } catch (_) { return localStorage.getItem(GIST_TOKEN_KEY) || ""; }
-  }
-  function setGistToken(token) {
-    try { GM_setValue(GIST_TOKEN_KEY, token); } catch (_) { localStorage.setItem(GIST_TOKEN_KEY, token); }
-  }
-  function getGistId() {
-    try { return GM_getValue(GIST_ID_KEY, ""); } catch (_) { return localStorage.getItem(GIST_ID_KEY) || ""; }
-  }
-  function setGistId(id) {
-    try { GM_setValue(GIST_ID_KEY, id); } catch (_) { localStorage.setItem(GIST_ID_KEY, id); }
-  }
-
-  function buildGistPayload() {
-    return {
-      produccion: getProduccionLog(),
-      precios: getPrecios()
-    };
-  }
-
-  function mergeProduccion(local, remote) {
-    const seen = new Set(local.map((e) => e.id));
-    const merged = [...local];
-    remote.forEach((e) => { if (!seen.has(e.id)) merged.push(e); });
-    merged.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    return merged;
-  }
-
-  async function syncToGist() {
-    const token = getGistToken();
-    if (!token) return;
-    let gistId = await ensureGistId(token);
-    const payload = JSON.stringify(buildGistPayload(), null, 2);
-
-    try {
-      if (gistId) {
-        await fetch(`https://api.github.com/gists/${gistId}`, {
-          method: "PATCH",
-          headers: { Authorization: `token ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ files: { [GIST_FILENAME]: { content: payload } } })
-        });
-      } else {
-        const res = await fetch("https://api.github.com/gists", {
-          method: "POST",
-          headers: { Authorization: `token ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            description: "Dentalink - Datos de producción (auto-sync)",
-            public: false,
-            files: { [GIST_FILENAME]: { content: payload } }
-          })
-        });
-        const data = await res.json();
-        if (data.id) setGistId(data.id);
-      }
-    } catch (_) { /* silent fail */ }
-  }
-
-  // Auto-descubrimiento: busca el gist por nombre de archivo
-  async function findGistByFilename(token) {
-    try {
-      const res = await fetch("https://api.github.com/gists?per_page=100", {
-        headers: { Authorization: `token ${token}` }
-      });
-      const gists = await res.json();
-      if (!Array.isArray(gists)) return null;
-      const found = gists.find((g) => g.files && g.files[GIST_FILENAME]);
-      return found ? found.id : null;
-    } catch (_) { return null; }
-  }
-
-  async function ensureGistId(token) {
-    let gistId = getGistId();
-    if (gistId) return gistId;
-    gistId = await findGistByFilename(token);
-    if (gistId) { setGistId(gistId); return gistId; }
-    return null;
-  }
-
-  async function syncFromGist() {
-    const token = getGistToken();
-    if (!token) return;
-    let gistId = await ensureGistId(token);
-    if (!gistId) return;
-
-    try {
-      const res = await fetch(`https://api.github.com/gists/${gistId}`, {
-        headers: { Authorization: `token ${token}` }
-      });
-      const data = await res.json();
-      const content = data.files?.[GIST_FILENAME]?.content;
-      if (!content) return;
-
-      const remote = JSON.parse(content);
-      if (Array.isArray(remote.produccion)) {
-        saveProduccionLog(mergeProduccion(getProduccionLog(), remote.produccion));
-      }
-      if (remote.precios && typeof remote.precios === "object") {
-        localStorage.setItem(PRECIOS_KEY, JSON.stringify({ ...remote.precios, ...getPrecios() }));
-      }
-    } catch (_) { /* silent fail */ }
-  }
-
-  async function handleSyncButton(btn) {
-    const token = getGistToken();
-    if (!token) {
-      const newToken = prompt(
-        "Para sincronizar entre equipos necesitas un GitHub Personal Access Token (PAT).\n\n" +
-        "Créalo en: github.com → Settings → Developer settings → Personal access tokens → Tokens (classic)\n" +
-        "Permisos requeridos: solo \"gist\"\n\n" +
-        "Pega tu token aquí:"
-      );
-      if (!newToken || !newToken.trim()) return;
-      setGistToken(newToken.trim());
-    }
-
-    btn.textContent = "⏳ ...";
-    btn.disabled = true;
-    try {
-      await syncFromGist();
-      await syncToGist();
-      updateProductionPanel();
-      btn.textContent = "✅ OK";
-      btn.classList.add("prod-sync-ok");
-    } catch (_) {
-      btn.textContent = "❌ Err";
-      btn.classList.add("prod-sync-err");
-    }
-    btn.disabled = false;
-    setTimeout(() => {
-      btn.textContent = "☁ Sync";
-      btn.classList.remove("prod-sync-ok", "prod-sync-err");
-    }, 3000);
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
   // INIT
   // ═══════════════════════════════════════════════════════════════════════
 
-  purgeOldProduction();
   watchPage(schedulePanel, {
     delay: 150,
-    isStale: () => !document.getElementById(PROD_PANEL_ID) ||
-      (isTargetPage() && getEditor() && !document.getElementById(PANEL_ID))
+    isStale: () => isTargetPage() && getEditor() && !document.getElementById(PANEL_ID)
   });
 })();
