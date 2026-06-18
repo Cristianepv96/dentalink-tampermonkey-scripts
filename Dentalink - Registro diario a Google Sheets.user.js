@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.1.3
+// @version      1.1.4
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -136,7 +136,7 @@
     if (index >= 0) {
       for (let i = index + 1; i < Math.min(allLines.length, index + 6); i += 1) {
         const match = allLines[i].match(/\$[\d.]+/);
-        if (match) return match[0];
+        if (match) return match[0].replace(/\D/g, "");
       }
     }
     return "";
