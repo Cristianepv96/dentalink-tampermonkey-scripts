@@ -13,7 +13,7 @@ Scripts de [Tampermonkey](https://www.tampermonkey.net/) para automatizar tareas
 | **Botones receta rápida** | Botones para insertar recetas predefinidas (Naproxeno, Amoxicilina, Azitromicina) en el editor de recetas. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js) |
 | **CUPS rápido** | Panel flotante con códigos CUPS comunes (SAVIA SALUD y FOMAG) para insertar rápidamente en la orden de servicio. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20CUPS%20rapido%20orden%20de%20servicio.user.js) |
 | **Resumen periodontograma** | Genera un resumen clínico de bolsas periodontales, sangrado, movilidad y furca desde el periodontograma de Dentalink. Incluye copiado al portapapeles. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma.user.js) |
-| **Registro diario a Google Sheets** | Copia desde el plan de tratamiento una fila lista para el registro diario: fecha, sede, paciente, ID plan, título y valor. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Registro%20diario%20a%20Google%20Sheets.user.js) |
+| **Registro diario a Google Sheets** | Envía o copia desde el plan de tratamiento una fila lista para el registro diario: fecha, sede, paciente, ID plan, título y valor. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Registro%20diario%20a%20Google%20Sheets.user.js) |
 
 > **Nota:** También se requiere instalar la dependencia compartida **[dentalink-utils.js](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js)**, pero esta se carga automáticamente vía `@require` al instalar cualquier script.
 
@@ -59,6 +59,34 @@ Si necesitas obtener la última versión inmediatamente:
 
 > **Importante:** Cada vez que se publique una nueva versión en este repositorio, el campo `@version` del script se incrementará y Tampermonkey lo detectará automáticamente.
 
+> **Repo privado:** Si este repositorio está privado, las URLs de instalación y actualización de `raw.githubusercontent.com` pueden requerir una sesión activa de GitHub con acceso al repositorio.
+
+---
+
+## Registro diario directo a Google Sheets
+
+El script **Registro diario a Google Sheets** puede enviar la fila directamente a una hoja mediante Google Apps Script. El botón **Copiar** queda como respaldo manual.
+
+### Apps Script
+
+1. Abre la hoja de cálculo del registro diario.
+2. Ve a **Extensiones → Apps Script**.
+3. Pega el contenido de [`apps-script/registro-diario.gs`](apps-script/registro-diario.gs).
+4. En **Configuración del proyecto → Propiedades de la secuencia de comandos**, crea:
+   - Propiedad: `REGISTRO_DIARIO_TOKEN`
+   - Valor: un token privado largo.
+5. Despliega como **Aplicación web**:
+   - Ejecutar como: **Yo**
+   - Quién tiene acceso: **Cualquier usuario con el enlace**
+6. Copia la URL terminada en `/exec`.
+
+### Tampermonkey
+
+1. Abre el menú de Tampermonkey del script.
+2. Ejecuta **Configurar envio a Google Sheets**.
+3. Pega la URL del Web App y el mismo token.
+4. En Dentalink, usa **Enviar**. El panel confirmará la fila agregada o avisará si ya existía.
+
 ---
 
 ## 🛠️ Personalización
@@ -93,6 +121,8 @@ Edita estos valores directamente en Tampermonkey para adaptar los textos a tus n
 ├── Dentalink - CUPS rapido orden de servicio.user.js
 ├── Dentalink - Resumen periodontograma.user.js
 ├── Dentalink - Registro diario a Google Sheets.user.js
+├── apps-script/
+│   └── registro-diario.gs
 └── README.md
 ```
 

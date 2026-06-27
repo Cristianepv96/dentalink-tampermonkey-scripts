@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.1.5
+// @version      1.2.0
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -12,6 +12,10 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_setClipboard
+// @grant        GM_registerMenuCommand
+// @grant        GM_xmlhttpRequest
+// @connect      script.google.com
+// @connect      script.googleusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -23,6 +27,7 @@
   const PANEL_ID = "dlk-registro-sheets-panel";
   const STYLE_ID = "dlk-registro-sheets-style";
   const STORAGE_KEY = "dlk_registro_sheets_payload_v1";
+  const CONFIG_KEY = "dlk_registro_sheets_config_v1";
   const TARGET_DENTALINK = /\/pacientes\/\d+\/tratamiento\/\d+\b/i;
   const TARGET_SHEETS = /^https:\/\/docs\.google\.com\/spreadsheets\/d\//i;
   const PLAN_TITLE_RE = /^\d{2}[/-]\d{2}[/-]\d{4}\s+\S.+/;
@@ -235,10 +240,107 @@
     }
   }
 
+  function getConfig() {
+    try {
+      return GM_getValue(CONFIG_KEY, { webAppUrl: "", token: "" }) || { webAppUrl: "", token: "" };
+    } catch (_) {
+      return { webAppUrl: "", token: "" };
+    }
+  }
+
+  function saveConfig(config) {
+    GM_setValue(CONFIG_KEY, {
+      webAppUrl: normalizeSpaces(config.webAppUrl || ""),
+      token: String(config.token || "").trim()
+    });
+  }
+
+  function configureSheetsIntegration() {
+    const current = getConfig();
+    const webAppUrl = window.prompt("URL del Web App de Apps Script", current.webAppUrl || "");
+    if (webAppUrl === null) return;
+    const token = window.prompt("Token compartido del Apps Script", current.token || "");
+    if (token === null) return;
+    saveConfig({ webAppUrl, token });
+    window.alert("Configuracion guardada. Usa Enviar desde el panel de Dentalink.");
+  }
+
   function copyPayload(payload) {
     const row = payloadToRow(payload);
     GM_setClipboard(row, "text");
     return row;
+  }
+
+  function payloadToSheetRecord(payload) {
+    return {
+      fecha: payload.fecha || "",
+      sede: payload.sede || "",
+      paciente: payload.paciente || "",
+      planId: payload.planId || "",
+      tituloPlan: payload.tituloPlan || "",
+      valor: payload.valor || "",
+      patientId: payload.patientId || "",
+      appointmentId: payload.appointmentId || "",
+      sourceUrl: payload.sourceUrl || "",
+      copiedAt: payload.copiedAt || ""
+    };
+  }
+
+  function missingRequiredFields(payload) {
+    return [
+      ["fecha", "fecha"],
+      ["sede", "sede"],
+      ["paciente", "paciente"],
+      ["planId", "ID plan"],
+      ["tituloPlan", "titulo"],
+      ["valor", "valor"]
+    ].filter(([key]) => !normalizeSpaces(payload[key])).map(([, label]) => label);
+  }
+
+  function postToSheets(payload) {
+    const config = getConfig();
+    if (!config.webAppUrl) {
+      return Promise.reject(new Error("Falta configurar la URL de Apps Script."));
+    }
+    if (!config.token) {
+      return Promise.reject(new Error("Falta configurar el token compartido."));
+    }
+
+    const missing = missingRequiredFields(payload);
+    if (missing.length) {
+      return Promise.reject(new Error(`Falta ${missing.join(", ")}.`));
+    }
+
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: "POST",
+        url: config.webAppUrl,
+        headers: {
+          "Content-Type": "application/json"
+        },
+        data: JSON.stringify({
+          token: config.token,
+          record: payloadToSheetRecord(payload)
+        }),
+        timeout: 20000,
+        onload: (response) => {
+          let body = null;
+          try {
+            body = JSON.parse(response.responseText || "{}");
+          } catch (_) {
+            reject(new Error(`Respuesta invalida de Apps Script (${response.status}).`));
+            return;
+          }
+          if (response.status < 200 || response.status >= 300 || !body.ok) {
+            reject(new Error(body.error || `Apps Script respondio ${response.status}.`));
+            return;
+          }
+          resolve(body);
+        },
+        onerror: () => reject(new Error("No se pudo conectar con Apps Script.")),
+        ontimeout: () => reject(new Error("Apps Script no respondio a tiempo."))
+      });
+    });
   }
 
   function currentSheetCell() {
@@ -387,12 +489,13 @@
       `#${payload.planId || "-"}`,
       `${payload.fecha || "-"} · ${payload.hora || "--:--"}`
     );
-    const copyButton = button("Copiar", "copy");
+    const sendButton = button("Enviar", "send");
+    const copyButton = button("Copiar", "copy", "secondary");
     const refreshButton = button("Refrescar", "refresh", "secondary");
     const statusEl = document.createElement("div");
     statusEl.className = "dlk-registro-status";
     statusEl.textContent = payload.tituloPlan || "Listo.";
-    panel.append(copyButton, refreshButton, statusEl);
+    panel.append(sendButton, copyButton, refreshButton, statusEl);
 
     panel.onclick = (event) => {
       const action = event.target?.dataset?.action;
@@ -401,6 +504,17 @@
       if (action === "refresh") {
         setStatus(panel, `Actualizado: ${payload.fecha || "-"} ${payload.hora || ""}`, "ok");
         summaryEl.textContent = `${payload.fecha || "-"} · ${payload.hora || "--:--"}`;
+        return;
+      }
+      if (action === "send") {
+        savePayload(payload);
+        setStatus(panel, "Enviando a Sheets...", "warn");
+        postToSheets(payload)
+          .then((result) => {
+            const suffix = result.duplicate ? `Ya existia en fila ${result.row}.` : `Fila ${result.row} agregada.`;
+            setStatus(panel, suffix, result.duplicate ? "warn" : "ok");
+          })
+          .catch((error) => setStatus(panel, error.message, "err"));
         return;
       }
       savePayload(payload);
@@ -469,6 +583,8 @@
   function scheduleRender() {
     window.setTimeout(render, 500);
   }
+
+  GM_registerMenuCommand("Configurar envio a Google Sheets", configureSheetsIntegration);
 
   scheduleRender();
   watchPage(scheduleRender, {
