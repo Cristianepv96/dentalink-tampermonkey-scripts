@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.1.4
+// @version      1.1.5
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -179,14 +179,6 @@
       null;
   }
 
-  function buildNote(payload) {
-    const parts = [`Extraido de Dentalink plan ${payload.planId}`];
-    if (payload.appointmentId) parts.push(`cita ${payload.appointmentId}`);
-    if (payload.patientId) parts.push(`paciente ${payload.patientId}`);
-    parts.push(`copiado ${new Date().toLocaleString("es-CO")}`);
-    return parts.join("; ");
-  }
-
   function extractPayload() {
     const allLines = lines();
     const patientId = getPatientIdFromUrl();
@@ -208,14 +200,12 @@
       tituloPlan: title,
       estadoCita: appointment?.status || "",
       valor: value,
-      nota: "",
       patientId,
       appointmentId: appointment?.id || "",
       sourceUrl: location.href,
       copiedAt: new Date().toISOString()
     };
 
-    payload.nota = buildNote(payload);
     return payload;
   }
 
@@ -223,13 +213,10 @@
     return [
       payload.fecha,
       payload.sede,
-      payload.hora,
       payload.paciente,
       payload.planId,
       payload.tituloPlan,
-      payload.estadoCita,
       payload.valor,
-      payload.nota,
       "",
       "",
       ""
