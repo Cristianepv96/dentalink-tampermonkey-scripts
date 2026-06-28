@@ -72,7 +72,7 @@ El script **Registro diario a Google Sheets** puede enviar la fila directamente 
 3. Pega el contenido de [`apps-script/registro-diario.gs`](apps-script/registro-diario.gs).
 4. En **Configuración del proyecto → Propiedades de la secuencia de comandos**, crea:
    - Propiedad: `REGISTRO_DIARIO_TOKEN`
-   - Valor: un token privado largo.
+   - Valor: `13487561`
 5. Despliega como **Aplicación web**:
    - Ejecutar como: **Yo**
    - Quién tiene acceso: **Cualquier usuario con el enlace**
@@ -82,7 +82,7 @@ El script **Registro diario a Google Sheets** puede enviar la fila directamente 
 
 1. Abre el menú de Tampermonkey del script.
 2. Ejecuta **Configurar envio a Google Sheets**.
-3. Confirma la URL prellenada y pega el mismo token.
+3. Confirma la URL y el token prellenados.
 4. En Dentalink, usa **Enviar**. El panel confirmará la fila agregada o avisará si ya existía.
 
 ---
