@@ -1,7 +1,7 @@
 const CONFIG = {
-  SHEET_NAME: "Registro diario",
+  DEFAULT_SHEET_NAME: "Junio",
   TOKEN: "13487561",
-  HEADER_ROW: 1,
+  HEADER_ROW: 5,
   COLUMNS: [
     "Fecha",
     "Sede",
@@ -28,7 +28,7 @@ function doGet(event) {
       return json_({
         ok: true,
         service: "registro-diario",
-        sheetName: CONFIG.SHEET_NAME,
+        defaultSheetName: CONFIG.DEFAULT_SHEET_NAME,
         columns: CONFIG.COLUMNS
       });
     }
@@ -44,7 +44,7 @@ function doGet(event) {
 function saveRecord_(body) {
   assertAuthorized_(body);
   const record = normalizeRecord_(body.record || body);
-  const sheet = getSheet_();
+  const sheet = getSheet_(record);
   ensureHeaders_(sheet);
 
   const key = buildKey_(record);
@@ -95,11 +95,12 @@ function parseJson_(event) {
   }
 }
 
-function getSheet_() {
+function getSheet_(record) {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = spreadsheet.getSheetByName(CONFIG.SHEET_NAME);
+  const sheetName = sheetNameFromDate_(record?.fecha) || CONFIG.DEFAULT_SHEET_NAME;
+  const sheet = spreadsheet.getSheetByName(sheetName) || spreadsheet.getSheetByName(CONFIG.DEFAULT_SHEET_NAME);
   if (!sheet) {
-    throw new Error(`No existe la hoja ${CONFIG.SHEET_NAME}.`);
+    throw new Error(`No existe la hoja ${sheetName}.`);
   }
   return sheet;
 }
@@ -192,6 +193,27 @@ function text_(value) {
 
 function digits_(value) {
   return text_(value).replace(/\D/g, "");
+}
+
+function sheetNameFromDate_(value) {
+  const match = text_(value).match(/\b\d{1,2}\/(\d{1,2})\/\d{4}\b/);
+  if (!match) return "";
+  const names = [
+    "",
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre"
+  ];
+  return names[Number(match[1])] || "";
 }
 
 function json_(payload) {
