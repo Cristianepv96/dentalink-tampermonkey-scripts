@@ -1,6 +1,6 @@
 const CONFIG = {
   SHEET_NAME: "Registro diario",
-  TOKEN_PROPERTY: "REGISTRO_DIARIO_TOKEN",
+  TOKEN: "13487561",
   HEADER_ROW: 1,
   COLUMNS: [
     "Fecha",
@@ -52,13 +52,8 @@ function doPost(event) {
 }
 
 function assertAuthorized_(body) {
-  const expected = PropertiesService.getScriptProperties().getProperty(CONFIG.TOKEN_PROPERTY);
-  if (!expected) {
-    throw new Error(`Falta configurar Script property ${CONFIG.TOKEN_PROPERTY}.`);
-  }
-
   const sent = String(body?.token || "");
-  if (sent !== expected) {
+  if (sent !== CONFIG.TOKEN) {
     throw new Error("Token no autorizado.");
   }
 }

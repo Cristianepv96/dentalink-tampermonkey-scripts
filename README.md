@@ -70,13 +70,10 @@ El script **Registro diario a Google Sheets** puede enviar la fila directamente 
 1. Abre la hoja de cálculo del registro diario.
 2. Ve a **Extensiones → Apps Script**.
 3. Pega el contenido de [`apps-script/registro-diario.gs`](apps-script/registro-diario.gs).
-4. En **Configuración del proyecto → Propiedades de la secuencia de comandos**, crea:
-   - Propiedad: `REGISTRO_DIARIO_TOKEN`
-   - Valor: `13487561`
-5. Despliega como **Aplicación web**:
+4. Despliega como **Aplicación web**:
    - Ejecutar como: **Yo**
    - Quién tiene acceso: **Cualquier usuario con el enlace**
-6. La URL del Web App ya viene incluida en el userscript.
+5. La URL del Web App ya viene incluida en el userscript.
 
 ### Tampermonkey
 
