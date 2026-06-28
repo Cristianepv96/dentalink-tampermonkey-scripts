@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.2.0
+// @version      1.2.1
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -28,6 +28,7 @@
   const STYLE_ID = "dlk-registro-sheets-style";
   const STORAGE_KEY = "dlk_registro_sheets_payload_v1";
   const CONFIG_KEY = "dlk_registro_sheets_config_v1";
+  const DEFAULT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxH-rKV0gmufxqHf1OLHGEEdW9YhJ5CuPmmADb8HGmH2RPNLmMWuyxra356-_Z8ICcf/exec";
   const TARGET_DENTALINK = /\/pacientes\/\d+\/tratamiento\/\d+\b/i;
   const TARGET_SHEETS = /^https:\/\/docs\.google\.com\/spreadsheets\/d\//i;
   const PLAN_TITLE_RE = /^\d{2}[/-]\d{2}[/-]\d{4}\s+\S.+/;
@@ -242,9 +243,13 @@
 
   function getConfig() {
     try {
-      return GM_getValue(CONFIG_KEY, { webAppUrl: "", token: "" }) || { webAppUrl: "", token: "" };
+      const saved = GM_getValue(CONFIG_KEY, null) || {};
+      return {
+        webAppUrl: saved.webAppUrl || DEFAULT_WEB_APP_URL,
+        token: saved.token || ""
+      };
     } catch (_) {
-      return { webAppUrl: "", token: "" };
+      return { webAppUrl: DEFAULT_WEB_APP_URL, token: "" };
     }
   }
 

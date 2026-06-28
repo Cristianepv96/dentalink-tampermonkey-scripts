@@ -59,8 +59,6 @@ Si necesitas obtener la última versión inmediatamente:
 
 > **Importante:** Cada vez que se publique una nueva versión en este repositorio, el campo `@version` del script se incrementará y Tampermonkey lo detectará automáticamente.
 
-> **Repo privado:** Si este repositorio está privado, las URLs de instalación y actualización de `raw.githubusercontent.com` pueden requerir una sesión activa de GitHub con acceso al repositorio.
-
 ---
 
 ## Registro diario directo a Google Sheets
@@ -78,13 +76,13 @@ El script **Registro diario a Google Sheets** puede enviar la fila directamente 
 5. Despliega como **Aplicación web**:
    - Ejecutar como: **Yo**
    - Quién tiene acceso: **Cualquier usuario con el enlace**
-6. Copia la URL terminada en `/exec`.
+6. La URL del Web App ya viene incluida en el userscript.
 
 ### Tampermonkey
 
 1. Abre el menú de Tampermonkey del script.
 2. Ejecuta **Configurar envio a Google Sheets**.
-3. Pega la URL del Web App y el mismo token.
+3. Confirma la URL prellenada y pega el mismo token.
 4. En Dentalink, usa **Enviar**. El panel confirmará la fila agregada o avisará si ya existía.
 
 ---
