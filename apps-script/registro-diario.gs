@@ -51,6 +51,15 @@ function doPost(event) {
   }
 }
 
+function doGet() {
+  return json_({
+    ok: true,
+    service: "registro-diario",
+    sheetName: CONFIG.SHEET_NAME,
+    columns: CONFIG.COLUMNS
+  });
+}
+
 function assertAuthorized_(body) {
   const sent = String(body?.token || "");
   if (sent !== CONFIG.TOKEN) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.2.2
+// @version      1.2.3
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -334,7 +334,9 @@
           try {
             body = JSON.parse(response.responseText || "{}");
           } catch (_) {
-            reject(new Error(`Respuesta invalida de Apps Script (${response.status}).`));
+            const text = normalizeSpaces(response.responseText || "");
+            const hint = /doGet/i.test(text) ? "Reimplementa la Web App con el Apps Script actualizado." : "Apps Script devolvio HTML en vez de JSON.";
+            reject(new Error(`${hint} (${response.status}).`));
             return;
           }
           if (response.status < 200 || response.status >= 300 || !body.ok) {
