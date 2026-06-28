@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.2.3
+// @version      1.2.4
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -318,16 +318,13 @@
     }
 
     return new Promise((resolve, reject) => {
+      const params = new URLSearchParams({
+        token: config.token,
+        record: JSON.stringify(payloadToSheetRecord(payload))
+      });
       GM_xmlhttpRequest({
-        method: "POST",
-        url: config.webAppUrl,
-        headers: {
-          "Content-Type": "application/json"
-        },
-        data: JSON.stringify({
-          token: config.token,
-          record: payloadToSheetRecord(payload)
-        }),
+        method: "GET",
+        url: `${config.webAppUrl}?${params.toString()}`,
         timeout: 20000,
         onload: (response) => {
           let body = null;

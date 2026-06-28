@@ -15,48 +15,67 @@ const CONFIG = {
 function doPost(event) {
   try {
     const body = parseJson_(event);
-    assertAuthorized_(body);
-    const record = normalizeRecord_(body.record || body);
-    const sheet = getSheet_();
-    ensureHeaders_(sheet);
-
-    const key = buildKey_(record);
-    const duplicateRow = findRowByKey_(sheet, key);
-    if (duplicateRow) {
-      return json_({
-        ok: true,
-        duplicate: true,
-        row: duplicateRow,
-        key,
-        record: rowToRecord_(sheet.getRange(duplicateRow, 1, 1, CONFIG.COLUMNS.length).getDisplayValues()[0])
-      });
-    }
-
-    const row = recordToRow_(record);
-    sheet.appendRow(row);
-    const insertedRow = sheet.getLastRow();
-    const saved = sheet.getRange(insertedRow, 1, 1, CONFIG.COLUMNS.length).getDisplayValues()[0];
-    return json_({
-      ok: true,
-      duplicate: false,
-      row: insertedRow,
-      key,
-      record: rowToRecord_(saved)
-    });
+    return saveRecord_(body);
   } catch (error) {
-    return json_({
-      ok: false,
-      error: error.message || String(error)
-    });
+    return error_(error);
   }
 }
 
-function doGet() {
+function doGet(event) {
+  try {
+    const params = event?.parameter || {};
+    if (!params.record) {
+      return json_({
+        ok: true,
+        service: "registro-diario",
+        sheetName: CONFIG.SHEET_NAME,
+        columns: CONFIG.COLUMNS
+      });
+    }
+    return saveRecord_({
+      token: params.token,
+      record: JSON.parse(params.record)
+    });
+  } catch (error) {
+    return error_(error);
+  }
+}
+
+function saveRecord_(body) {
+  assertAuthorized_(body);
+  const record = normalizeRecord_(body.record || body);
+  const sheet = getSheet_();
+  ensureHeaders_(sheet);
+
+  const key = buildKey_(record);
+  const duplicateRow = findRowByKey_(sheet, key);
+  if (duplicateRow) {
+    return json_({
+      ok: true,
+      duplicate: true,
+      row: duplicateRow,
+      key,
+      record: rowToRecord_(sheet.getRange(duplicateRow, 1, 1, CONFIG.COLUMNS.length).getDisplayValues()[0])
+    });
+  }
+
+  const row = recordToRow_(record);
+  sheet.appendRow(row);
+  const insertedRow = sheet.getLastRow();
+  const saved = sheet.getRange(insertedRow, 1, 1, CONFIG.COLUMNS.length).getDisplayValues()[0];
   return json_({
     ok: true,
-    service: "registro-diario",
-    sheetName: CONFIG.SHEET_NAME,
-    columns: CONFIG.COLUMNS
+    duplicate: false,
+    row: insertedRow,
+    key,
+    record: rowToRecord_(saved)
+  });
+}
+
+function error_(error) {
+  return json_({
+    ok: false,
+    error: error.message || String(error)
   });
 }
 
