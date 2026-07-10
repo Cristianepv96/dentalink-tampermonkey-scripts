@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Dentalink - Condensación de evoluciones
 // @namespace    san-jose-ips-odontologica
-// @version      0.5.1
+// @version      0.5.2
 // @description  Resume localmente el avance periodontal en la ficha de evoluciones.
 // @author       Cris
-// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensacio%CC%81n%20de%20evoluciones.user.js
-// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensacio%CC%81n%20de%20evoluciones.user.js
+// @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js
+// @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js
 // @match        https://*.dentalink.cl/*
 // @grant        none
 // @run-at       document-start
@@ -21,7 +21,7 @@
   const COLLAPSED_ENTRY_CLASS = 'sj-periodontal-collapsed-entry';
   const COMPLETED_ENTRY_CLASS = 'sj-periodontal-completed-entry';
   const COMPLETED_BADGE_CLASS = 'sj-periodontal-completed-badge';
-  const SCRIPT_VERSION = '0.5.1';
+  const SCRIPT_VERSION = '0.5.2';
   const PROFESSIONAL_NAME = 'CRISTIAN EDUARDO PEÑA VILLAMIZAR';
   const PAGE_PATTERN = /\/pacientes\/\d+\/ficha\/evoluciones/;
   let renderTimer;
