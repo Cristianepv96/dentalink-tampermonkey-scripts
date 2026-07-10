@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.4.5
+// @version      2.4.6
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -195,8 +195,6 @@ Se verifica la ausencia de depósitos remanentes mediante exploración táctil.
 
 INDICACIONES Y EGRESO
 Egreso: Paciente finaliza el procedimiento en buenas condiciones generales, consciente, orientado y con hemostasia controlada.
-Farmacología:
-${CONFIG.farmacologia.naproxeno}
 
 Recomendaciones:
 Instrucción en técnica de cepillado y uso de seda dental.

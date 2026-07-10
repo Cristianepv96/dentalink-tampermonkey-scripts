@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Botones receta rapida
 // @namespace    https://odontofamily.local/dentalink-recetas
-// @version      1.3.1
+// @version      1.4.0
 // @description  Agrega botones para insertar recetas predefinidas en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -23,7 +23,8 @@
 
   const RECETA_NAP_AMOX = [
     "Amoxicilina 500mg #21 Tomar 1 cápsula cada 8 horas por 7 días.",
-    "Naproxeno 500mg #9 Tomar 1 tableta cada 8 horas por 3 días."
+    "Naproxeno 500mg #9 Tomar 1 tableta cada 8 horas por 3 días.",
+    "No escupir, no bebidas con pitillos, no fumar, no agacharse, no ejercicio, no cosas calientes, no alcohol, limpiar la zona con mucho cuidado, retiro de sutura a los 8 días, sin cita."
   ];
 
   const RECETA_NAPROXENO = [
@@ -36,6 +37,14 @@
 
   const RECETA_AZITROMICINA = [
     "Azitromicina 500mg #3 Tomar 1 tableta cada 24 horas por 3 días."
+  ];
+
+  const RECETA_INTERPROXIMAL = [
+    "Cepillo interproximal para utilizar entre los dientes, de diferentes tamaños"
+  ];
+
+  const RECETA_PERIOAID = [
+    "Perioaid, usar hasta terminar el envase, no comprar sin receta de periodoncia, cambia sabor de comidas y cambia color de dientes, uso hasta terminar y no volver a comprar. Modo de uso: 1 hora después del cepillado."
   ];
 
   function isRecetasPage() {
@@ -93,6 +102,7 @@
     style.textContent = `
       #${PANEL_ID} {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: 8px;
         margin: 8px 0 10px;
@@ -172,6 +182,8 @@
       panel.appendChild(createButton("Naproxeno", RECETA_NAPROXENO));
       panel.appendChild(createButton("Amox", RECETA_AMOX));
       panel.appendChild(createButton("Azitromicina", RECETA_AZITROMICINA));
+      panel.appendChild(createButton("Interproximal", RECETA_INTERPROXIMAL));
+      panel.appendChild(createButton("Perioaid", RECETA_PERIOAID));
     }
 
     if (panel.nextElementSibling !== anchor) {
