@@ -7,6 +7,7 @@ Scripts de [Tampermonkey](https://www.tampermonkey.net/) para automatizar tareas
 
 | Script | Descripción | Instalar |
 |---|---|---|
+| **Condensación de evoluciones** | Resume localmente el avance periodontal en la ficha de evoluciones, agrupando tratamientos solicitados y realizados. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensacio%CC%81n%20de%20evoluciones.user.js) |
 | **Evoluciones periodoncia** | Botones de textos rápidos para evoluciones de valoración, alisado cerrado/abierto, alargamiento y detartraje. Incluye formularios modales para datos variables (dientes, anestesia, duración). | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js) |
 | **Autollenado orden de servicio** | Rellena automáticamente los campos base de la orden de servicio (fecha, NRO, origen, prioridad, código K053, tipo de diagnóstico). | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js) |
 | **Antecedentes por defecto** | Rellena textareas de antecedentes (motivo de consulta, enfermedad actual, antecedentes odontológicos) con textos por defecto cuando están vacíos. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js) |
@@ -110,6 +111,7 @@ Edita estos valores directamente en Tampermonkey para adaptar los textos a tus n
 ```
 ├── dentalink-utils.js                              # Utilidades compartidas (@require)
 ├── Dentalink - Evoluciones periodoncia.user.js     # Textos rápidos evoluciones
+├── Dentalink - Condensación de evoluciones.user.js # Resumen de avances en evoluciones
 ├── Dentalink - Autollenado orden de servicio.user.js
 ├── Dentalink - Antecedentes por defecto.user.js
 ├── Dentalink - Botones receta rapida.user.js
