@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Condensación de evoluciones
 // @namespace    san-jose-ips-odontologica
-// @version      0.5.2
+// @version      0.6.0
 // @description  Resume localmente el avance periodontal en la ficha de evoluciones.
 // @author       Cris
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js
@@ -21,9 +21,11 @@
   const COLLAPSED_ENTRY_CLASS = 'sj-periodontal-collapsed-entry';
   const COMPLETED_ENTRY_CLASS = 'sj-periodontal-completed-entry';
   const COMPLETED_BADGE_CLASS = 'sj-periodontal-completed-badge';
-  const SCRIPT_VERSION = '0.5.2';
+  const SCRIPT_VERSION = '0.6.0';
   const PROFESSIONAL_NAME = 'CRISTIAN EDUARDO PEÑA VILLAMIZAR';
   const PAGE_PATTERN = /\/pacientes\/\d+\/ficha\/evoluciones/;
+  const RENDER_DEBOUNCE_MS = 180;
+  const SOURCE_SETTLE_MS = 800;
   let renderTimer;
   let lastSignature = '';
   let lastPath = location.pathname;
@@ -33,6 +35,8 @@
   let lastAttemptedPath = '';
   let observer;
   let observedRoot;
+  let pendingSourceText = '';
+  let pendingSourceSince = 0;
 
   function teethFrom(text) {
     return [...text.matchAll(/\b([1-4])\s*\.?\s*([1-8])\b/g)]
@@ -87,17 +91,30 @@
 
   function findRequestedTreatments(text) {
     const requested = { open: [], closed: [] };
-    const blocks = [...text.matchAll(
-      /Se solicita autorizaci[oó]n para realizar:([\s\S]*?)(?=NOTA IMPORTANTE|ATENDIDO POR|Firmas|$)/gi,
-    )];
+    let inAuthorizationBlock = false;
 
-    const sources = blocks.length ? blocks.map((match) => match[1]) : [text];
-    for (const source of sources) {
-      for (const line of source.split('\n')) {
-        const category = treatmentCategory(line);
-        if (!category) continue;
-        requested[category].push(...teethFrom(line));
+    for (const line of text.split('\n')) {
+      const normalizedLine = normalizeName(line);
+      if (/^SE SOLICITA AUTORIZACION PARA REALIZAR\s*:?$/.test(normalizedLine)) {
+        inAuthorizationBlock = true;
+        continue;
       }
+
+      if (/^(NOTA IMPORTANTE|ATENDIDO POR|FIRMAS)\b/.test(normalizedLine)
+        || /^.+?\s+\(#\d+\)$/.test(line.trim())
+        || /^ACCION REALIZADA\s*:/.test(normalizedLine)) {
+        inAuthorizationBlock = false;
+      }
+
+      const isInlineRequest = /^[-•]?\s*SE SOLICITA\b/.test(normalizedLine);
+      if (!inAuthorizationBlock && !isInlineRequest) continue;
+
+      const category = treatmentCategory(line);
+      if (!category) continue;
+
+      const categoryTail = line.match(/\b(?:ABIERTO|CERRADO)\b([\s\S]*)/i)?.[1] || '';
+      const treatmentOnly = categoryTail.split(/\s+-\s+/)[0];
+      requested[category].push(...teethFrom(treatmentOnly));
     }
 
     requested.open = sortedUnique(requested.open);
@@ -120,7 +137,11 @@
       if (piece) completed[category].push(Number(`${piece[1]}${piece[2]}`));
 
       const expandedTeeth = segment.match(/Dientes:\s*([^\n.]+)/i);
-      if (expandedTeeth) completed[category].push(...teethFrom(expandedTeeth[1]));
+      if (expandedTeeth) {
+        const procedureLine = segment.match(/PROCEDIMIENTO:\s*[^\n]+/i)?.[0] || '';
+        const expandedCategory = treatmentCategory(procedureLine) || category;
+        completed[expandedCategory].push(...teethFrom(expandedTeeth[1]));
+      }
     }
 
     completed.open = sortedUnique(completed.open);
@@ -535,10 +556,23 @@
   }
 
   function getSourceText(main) {
-    const card = document.getElementById(CARD_ID);
-    const fullText = main.innerText;
-    if (!card) return fullText;
-    return fullText.replace(card.innerText, '');
+    let fullText = main.innerText;
+    const ownNodes = main.querySelectorAll([
+      `#${CARD_ID}`,
+      `.${GROUP_SUMMARY_CLASS}`,
+      `.${COMPLETED_BADGE_CLASS}`,
+    ].join(', '));
+
+    for (const node of ownNodes) {
+      const ownText = node.innerText;
+      if (ownText) fullText = fullText.replace(ownText, '');
+    }
+    return fullText;
+  }
+
+  function resetSourceStability() {
+    pendingSourceText = '';
+    pendingSourceSince = 0;
   }
 
   function detectRouteChange() {
@@ -549,6 +583,7 @@
     awaitingNewPatientContent = true;
     lastSignature = '';
     lastAttemptedPath = '';
+    resetSourceStability();
     document.getElementById(CARD_ID)?.remove();
     restoreCompactedEntries();
     clearCompletedHighlights();
@@ -568,6 +603,7 @@
       clearCompletedHighlights();
       lastSignature = '';
       lastSourceText = '';
+      resetSourceStability();
       return;
     }
 
@@ -580,6 +616,24 @@
       if (!sourceText.trim() || sourceText === sourceBeforeNavigation) return;
       awaitingNewPatientContent = false;
     }
+
+    if (sourceText !== pendingSourceText) {
+      pendingSourceText = sourceText;
+      pendingSourceSince = Date.now();
+      document.getElementById(CARD_ID)?.remove();
+      restoreCompactedEntries();
+      clearCompletedHighlights();
+      lastSignature = '';
+      scheduleRender(SOURCE_SETTLE_MS);
+      return;
+    }
+
+    const unsettledFor = Date.now() - pendingSourceSince;
+    if (unsettledFor < SOURCE_SETTLE_MS) {
+      scheduleRender(SOURCE_SETTLE_MS - unsettledFor);
+      return;
+    }
+
     lastSourceText = sourceText;
     lastAttemptedPath = location.pathname;
 
@@ -607,12 +661,13 @@
     lastSignature = signature;
   }
 
-  function scheduleRender() {
-    if (renderTimer) return;
+  function scheduleRender(delay = RENDER_DEBOUNCE_MS) {
+    const renderDelay = Number.isFinite(delay) ? Math.max(0, delay) : RENDER_DEBOUNCE_MS;
+    clearTimeout(renderTimer);
     renderTimer = setTimeout(() => {
       renderTimer = undefined;
       render();
-    }, 100);
+    }, renderDelay);
   }
 
   function ensureObserver() {
