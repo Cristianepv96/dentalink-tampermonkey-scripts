@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Condensación de evoluciones
 // @namespace    san-jose-ips-odontologica
-// @version      0.6.0
+// @version      0.6.1
 // @description  Resume localmente el avance periodontal en la ficha de evoluciones.
 // @author       Cris
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js
@@ -21,7 +21,7 @@
   const COLLAPSED_ENTRY_CLASS = 'sj-periodontal-collapsed-entry';
   const COMPLETED_ENTRY_CLASS = 'sj-periodontal-completed-entry';
   const COMPLETED_BADGE_CLASS = 'sj-periodontal-completed-badge';
-  const SCRIPT_VERSION = '0.6.0';
+  const SCRIPT_VERSION = '0.6.1';
   const PROFESSIONAL_NAME = 'CRISTIAN EDUARDO PEÑA VILLAMIZAR';
   const PAGE_PATTERN = /\/pacientes\/\d+\/ficha\/evoluciones/;
   const RENDER_DEBOUNCE_MS = 180;
@@ -556,7 +556,10 @@
   }
 
   function getSourceText(main) {
+    const collapsedEntries = [...main.querySelectorAll(`.${COLLAPSED_ENTRY_CLASS}`)];
+    collapsedEntries.forEach((entry) => entry.classList.remove(COLLAPSED_ENTRY_CLASS));
     let fullText = main.innerText;
+    collapsedEntries.forEach((entry) => entry.classList.add(COLLAPSED_ENTRY_CLASS));
     const ownNodes = main.querySelectorAll([
       `#${CARD_ID}`,
       `.${GROUP_SUMMARY_CLASS}`,
@@ -567,7 +570,11 @@
       const ownText = node.innerText;
       if (ownText) fullText = fullText.replace(ownText, '');
     }
-    return fullText;
+    return fullText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join('\n');
   }
 
   function resetSourceStability() {
