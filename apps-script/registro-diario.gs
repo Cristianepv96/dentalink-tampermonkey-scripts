@@ -1,5 +1,4 @@
 const CONFIG = {
-  DEFAULT_SHEET_NAME: "Junio",
   TOKEN: "13487561",
   HEADER_ROW: 5,
   COLUMNS: [
@@ -28,7 +27,6 @@ function doGet(event) {
       return json_({
         ok: true,
         service: "registro-diario",
-        defaultSheetName: CONFIG.DEFAULT_SHEET_NAME,
         columns: CONFIG.COLUMNS
       });
     }
@@ -53,6 +51,7 @@ function saveRecord_(body) {
     return json_({
       ok: true,
       duplicate: true,
+      sheet: sheet.getName(),
       row: duplicateRow,
       key,
       record: rowToRecord_(sheet.getRange(duplicateRow, 1, 1, CONFIG.COLUMNS.length).getDisplayValues()[0])
@@ -60,12 +59,19 @@ function saveRecord_(body) {
   }
 
   const row = recordToRow_(record);
-  sheet.appendRow(row);
-  const insertedRow = sheet.getLastRow();
-  const saved = sheet.getRange(insertedRow, 1, 1, CONFIG.COLUMNS.length).getDisplayValues()[0];
+  const insertedRow = findFirstEmptyRow_(sheet);
+  if (insertedRow > sheet.getMaxRows()) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), insertedRow - sheet.getMaxRows());
+  }
+  const target = sheet.getRange(insertedRow, 1, 1, CONFIG.COLUMNS.length);
+  target.setValues([row]);
+  target.getCell(1, 6).setNumberFormat("[$$]#,##0");
+  SpreadsheetApp.flush();
+  const saved = target.getDisplayValues()[0];
   return json_({
     ok: true,
     duplicate: false,
+    sheet: sheet.getName(),
     row: insertedRow,
     key,
     record: rowToRecord_(saved)
@@ -97,10 +103,13 @@ function parseJson_(event) {
 
 function getSheet_(record) {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetName = sheetNameFromDate_(record?.fecha) || CONFIG.DEFAULT_SHEET_NAME;
-  const sheet = spreadsheet.getSheetByName(sheetName) || spreadsheet.getSheetByName(CONFIG.DEFAULT_SHEET_NAME);
+  const sheetName = sheetNameFromDate_(record?.fecha);
+  if (!sheetName) {
+    throw new Error("No se pudo determinar el mes a partir de la fecha del registro.");
+  }
+  const sheet = spreadsheet.getSheetByName(sheetName);
   if (!sheet) {
-    throw new Error(`No existe la hoja ${sheetName}.`);
+    throw new Error(`No existe la hoja "${sheetName}". Créala y vuelve a enviar.`);
   }
   return sheet;
 }
@@ -121,7 +130,7 @@ function normalizeRecord_(record) {
     paciente: text_(record.paciente),
     planId: text_(record.planId),
     tituloPlan: text_(record.tituloPlan),
-    valor: digits_(record.valor),
+    valor: number_(record.valor),
     patientId: text_(record.patientId),
     appointmentId: text_(record.appointmentId),
     sourceUrl: text_(record.sourceUrl),
@@ -187,12 +196,30 @@ function findRowByKey_(sheet, key) {
   return 0;
 }
 
+function findFirstEmptyRow_(sheet) {
+  const firstDataRow = CONFIG.HEADER_ROW + 1;
+  const lastUsedRow = Math.max(sheet.getLastRow(), firstDataRow);
+  const values = sheet.getRange(
+    firstDataRow,
+    1,
+    lastUsedRow - firstDataRow + 1,
+    CONFIG.COLUMNS.length
+  ).getDisplayValues();
+  const emptyIndex = values.findIndex((row) => row.every((value) => !text_(value)));
+  return emptyIndex >= 0 ? firstDataRow + emptyIndex : lastUsedRow + 1;
+}
+
 function text_(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function digits_(value) {
   return text_(value).replace(/\D/g, "");
+}
+
+function number_(value) {
+  const digits = digits_(value);
+  return digits ? Number(digits) : "";
 }
 
 function sheetNameFromDate_(value) {

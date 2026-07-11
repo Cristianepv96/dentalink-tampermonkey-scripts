@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.2.4
+// @version      1.3.0
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -22,7 +22,7 @@
 (function () {
   "use strict";
 
-  const { normalizeSpaces, getPatientIdFromUrl, watchPage, registerPanel, unregisterPanel } = window.__dlkUtils;
+  const { isVisible, normalizeSpaces, setNativeValue, dispatchControlEvents, getPatientIdFromUrl, watchPage, registerPanel, unregisterPanel } = window.__dlkUtils;
 
   const PANEL_ID = "dlk-registro-sheets-panel";
   const STYLE_ID = "dlk-registro-sheets-style";
@@ -31,8 +31,9 @@
   const DEFAULT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxH-rKV0gmufxqHf1OLHGEEdW9YhJ5CuPmmADb8HGmH2RPNLmMWuyxra356-_Z8ICcf/exec";
   const DEFAULT_TOKEN = "13487561";
   const TARGET_DENTALINK = /\/pacientes\/\d+\/tratamiento\/\d+\b/i;
+  const TARGET_TREATMENTS = /\/pacientes\/\d+\/tratamientos\b/i;
   const TARGET_SHEETS = /^https:\/\/docs\.google\.com\/spreadsheets\/d\//i;
-  const PLAN_TITLE_RE = /^\d{2}[/-]\d{2}[/-]\d{4}\s+\S.+/;
+  const PLAN_TITLE_RE = /^(?:\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2})\s+\S.+/;
   const MONTHS = {
     enero: 1,
     febrero: 2,
@@ -57,6 +58,32 @@
     return TARGET_SHEETS.test(location.href);
   }
 
+  function bogotaToday() {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Bogota",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return {
+      day: values.day,
+      month: values.month,
+      year: values.year,
+      sheet: `${values.day}/${values.month}/${values.year}`,
+      planTitle: `${values.year}/${values.month}/${values.day} Cristian Peña`
+    };
+  }
+
+  function autofillTreatmentName() {
+    if (!TARGET_TREATMENTS.test(location.pathname)) return false;
+    const input = document.querySelector("input#nombre");
+    if (!input || !isVisible(input) || normalizeSpaces(input.value)) return false;
+    setNativeValue(input, bogotaToday().planTitle);
+    dispatchControlEvents(input);
+    return true;
+  }
+
   function lines() {
     return (document.body?.innerText || "")
       .split(/\n+/)
@@ -77,14 +104,19 @@
   }
 
   function parsePlanDate(title) {
-    const match = normalizeSpaces(title).match(/\b(\d{2})[/-](\d{2})[/-](\d{4})\b/);
-    if (!match) return null;
+    const text = normalizeSpaces(title);
+    const dayFirst = text.match(/\b(\d{2})[/-](\d{2})[/-](\d{4})\b/);
+    const yearFirst = text.match(/\b(\d{4})[/-](\d{2})[/-](\d{2})\b/);
+    if (!dayFirst && !yearFirst) return null;
+    const day = Number(dayFirst?.[1] || yearFirst[3]);
+    const month = Number(dayFirst?.[2] || yearFirst[2]);
+    const year = Number(dayFirst?.[3] || yearFirst[1]);
     return {
-      day: Number(match[1]),
-      month: Number(match[2]),
-      year: Number(match[3]),
-      sheet: `${match[1]}/${match[2]}/${match[3]}`,
-      iso: `${match[3]}-${match[2]}-${match[1]}`
+      day,
+      month,
+      year,
+      sheet: `${pad2(day)}/${pad2(month)}/${year}`,
+      iso: `${year}-${pad2(month)}-${pad2(day)}`
     };
   }
 
@@ -194,12 +226,16 @@
     const planDate = parsePlanDate(title);
     const appointments = collectAppointments(allLines);
     const appointment = pickAppointment(appointments, planDate);
-    const date = appointment?.dateTime?.sheet || planDate?.sheet || "";
+    const today = bogotaToday();
+    const dentalinkDate = appointment?.dateTime?.sheet || planDate?.sheet || "";
+    const date = today.sheet;
     const sede = appointment?.sede || findSede(allLines);
     const value = findCurrencyAfter(allLines, "Presupuesto total") || findCurrencyAfter(allLines, "Realizado");
 
     const payload = {
       fecha: date,
+      fechaDentalink: dentalinkDate,
+      fechaDiscrepante: Boolean(dentalinkDate && dentalinkDate !== date),
       sede,
       hora: appointment?.dateTime?.hour || "",
       paciente: findPatientName(allLines, patientId),
@@ -498,8 +534,10 @@
     const copyButton = button("Copiar", "copy", "secondary");
     const refreshButton = button("Refrescar", "refresh", "secondary");
     const statusEl = document.createElement("div");
-    statusEl.className = "dlk-registro-status";
-    statusEl.textContent = payload.tituloPlan || "Listo.";
+    statusEl.className = `dlk-registro-status ${payload.fechaDiscrepante ? "warn" : ""}`.trim();
+    statusEl.textContent = payload.fechaDiscrepante
+      ? `Dentalink: ${payload.fechaDentalink}. Se enviará hoy: ${payload.fecha}.`
+      : payload.tituloPlan || "Listo.";
     panel.append(sendButton, copyButton, refreshButton, statusEl);
 
     panel.onclick = (event) => {
@@ -507,7 +545,10 @@
       if (!action) return;
       payload = extractPayload();
       if (action === "refresh") {
-        setStatus(panel, `Actualizado: ${payload.fecha || "-"} ${payload.hora || ""}`, "ok");
+        const refreshText = payload.fechaDiscrepante
+          ? `Dentalink: ${payload.fechaDentalink}. Se usará hoy: ${payload.fecha}.`
+          : `Actualizado: ${payload.fecha || "-"} ${payload.hora || ""}`;
+        setStatus(panel, refreshText, payload.fechaDiscrepante ? "warn" : "ok");
         summaryEl.textContent = `${payload.fecha || "-"} · ${payload.hora || "--:--"}`;
         return;
       }
@@ -516,7 +557,8 @@
         setStatus(panel, "Enviando a Sheets...", "warn");
         postToSheets(payload)
           .then((result) => {
-            const suffix = result.duplicate ? `Ya existia en fila ${result.row}.` : `Fila ${result.row} agregada.`;
+            const location = result.sheet ? `${result.sheet}, fila ${result.row}` : `fila ${result.row}`;
+            const suffix = result.duplicate ? `Ya existia en ${location}.` : `Agregada en ${location}.`;
             setStatus(panel, suffix, result.duplicate ? "warn" : "ok");
           })
           .catch((error) => setStatus(panel, error.message, "err"));
@@ -576,6 +618,7 @@
   }
 
   function render() {
+    autofillTreatmentName();
     if (isDentalinkPlan()) {
       renderDentalinkPanel();
     } else if (isSheet()) {

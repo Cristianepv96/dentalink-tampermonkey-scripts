@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Botones receta rapida
 // @namespace    https://odontofamily.local/dentalink-recetas
-// @version      1.4.0
+// @version      1.4.1
 // @description  Agrega botones para insertar recetas predefinidas en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -19,6 +19,7 @@
 
   const PANEL_ID = "dlk-recetas-rapidas";
   const STYLE_ID = "dlk-recetas-rapidas-style";
+  const UNDO_ID = "dlk-recetas-rapidas-undo";
   const TARGET_PATH = /\/pacientes\/\d+\/ficha\/recetas\b/i;
 
   const RECETA_NAP_AMOX = [
@@ -70,6 +71,45 @@
     textarea.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
+  function dispatchEditorEvents(editor, text) {
+    try {
+      editor.dispatchEvent(new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: text
+      }));
+    } catch (_error) {
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    editor.dispatchEvent(new Event("change", { bubbles: true }));
+    editor.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+  }
+
+  function removeUndo() {
+    document.getElementById(UNDO_ID)?.remove();
+    window.clearTimeout(removeUndo.timer);
+  }
+
+  function showUndoButton(editor, previousHtml) {
+    removeUndo();
+    const button = document.createElement("button");
+    button.id = UNDO_ID;
+    button.type = "button";
+    button.textContent = "↩ Deshacer inserción";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      editor.focus();
+      editor.innerHTML = previousHtml;
+      dispatchEditorEvents(editor, "");
+      syncHiddenTextarea(editor, previousHtml);
+      removeUndo();
+    });
+
+    document.getElementById(PANEL_ID)?.appendChild(button);
+    removeUndo.timer = window.setTimeout(removeUndo, 10000);
+  }
+
   function setRecipe(lines) {
     const editor = getEditor();
     if (!editor) {
@@ -78,20 +118,14 @@
     }
 
     const html = linesToHtml(lines);
+    const previousHtml = editor.innerHTML;
+    const hasContent = Boolean((editor.innerText || editor.textContent || "").trim());
+    const nextHtml = hasContent ? `${previousHtml}<p><br></p>${html}` : html;
     editor.focus();
-    editor.innerHTML = html;
-    try {
-      editor.dispatchEvent(new InputEvent("input", {
-        bubbles: true,
-        inputType: "insertText",
-        data: lines.join("\n")
-      }));
-    } catch (_error) {
-      editor.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    editor.dispatchEvent(new Event("change", { bubbles: true }));
-    editor.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
-    syncHiddenTextarea(editor, html);
+    editor.innerHTML = nextHtml;
+    dispatchEditorEvents(editor, lines.join("\n"));
+    syncHiddenTextarea(editor, nextHtml);
+    showUndoButton(editor, previousHtml);
   }
 
   function ensureStyles() {
@@ -128,6 +162,19 @@
       }
       #${PANEL_ID} button:active {
         transform: translateY(1px);
+      }
+      #${UNDO_ID} {
+        border-color: #f97316;
+        background: #fff7ed;
+        color: #c2410c;
+        animation: dlk-recetas-undo-fade 10s ease-in forwards;
+      }
+      #${UNDO_ID}:hover {
+        background: #fed7aa;
+      }
+      @keyframes dlk-recetas-undo-fade {
+        0%, 70% { opacity: 1; }
+        100% { opacity: 0; }
       }
     `;
     document.head.appendChild(style);

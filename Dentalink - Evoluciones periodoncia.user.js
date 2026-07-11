@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.4.6
+// @version      2.5.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -165,6 +165,11 @@
   function buildAlisadoCerradoText(values) {
     const duration = Number(values.duracion) || 45;
     const range = currentTimeRange(duration);
+    const anestesia = values.usarAnestesia === "sin"
+      ? "ANESTESIA\nProcedimiento realizado sin anestesia local."
+      : `ANESTESIA
+Farmaco: ${CONFIG.anestesia.farmaco} (${values.carpules} carpules en total).
+Técnica: ${values.tecnica}`;
     return `DIAGNÓSTICO: ${CONFIG.diagnostico}
 PROCEDIMIENTO: Raspado y Alisado Radicular (RAR) Campo Cerrado
 Dientes: ${values.dientes}
@@ -174,9 +179,7 @@ VALORACION Y PREPARACION
 Hallazgos clínicos: Se observa presencia de cálculos supra y subgingivales, inflamación gingival generalizada y sangrado al sondaje.
 Asepsia: Enjuague previo con clorhexidina al 0.12% para disminuir la carga bacteriana salival.
 
-ANESTESIA
-Farmaco: ${CONFIG.anestesia.farmaco} (${values.carpules} carpules en total).
-Técnica: ${values.tecnica}
+${anestesia}
 
 FASE DE DESBRIDAMIENTO (ULTRASONIDO)
 Se realiza remoción de depósitos calcificados (K036 - Sarro/Cálculo) supragingivales y tinciones extrínsecas mediante el uso de scaler ultrasónico, bajo irrigación constante para control de temperatura y remoción de detritos.
@@ -548,7 +551,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       }
       #${MODAL_ID} h3 { margin: 0 0 12px; color: #0f172a; font-size: 16px; }
       #${MODAL_ID} label { display: block; margin: 8px 0 4px; color: #475569; font-size: 12px; font-weight: 700; }
-      #${MODAL_ID} input {
+      #${MODAL_ID} input, #${MODAL_ID} select {
         box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 5px; padding: 8px; font-size: 13px;
       }
       #${MODAL_ID} .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
@@ -575,8 +578,12 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       <form class="box">
         <h3>${escapeHtml(title)}</h3>
         ${fields.map((f) => `
-          <label for="dlk-evo-${f.name}">${escapeHtml(f.label)}</label>
-          <input id="dlk-evo-${f.name}" name="${f.name}" autocomplete="off" value="${escapeHtml(f.value || "")}">
+          <div class="field"${f.dependsOn ? ` data-depends-on="${escapeHtml(f.dependsOn.name)}" data-depends-value="${escapeHtml(f.dependsOn.value)}"` : ""}>
+            <label for="dlk-evo-${f.name}">${escapeHtml(f.label)}</label>
+            ${f.type === "select"
+              ? `<select id="dlk-evo-${f.name}" name="${f.name}">${f.options.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === f.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`
+              : `<input id="dlk-evo-${f.name}" name="${f.name}" autocomplete="off" value="${escapeHtml(f.value || "")}">`}
+          </div>
         `).join("")}
         <div class="actions">
           <button class="cancel" type="button">Cancelar</button>
@@ -590,6 +597,14 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     modal.addEventListener("click", (e) => {
       if (e.target === modal || e.target.closest(".cancel")) closePrompt();
     });
+
+    const updateDependentFields = () => {
+      modal.querySelectorAll("[data-depends-on]").forEach((field) => {
+        const controller = modal.querySelector(`[name="${field.dataset.dependsOn}"]`);
+        field.hidden = controller?.value !== field.dataset.dependsValue;
+      });
+    };
+    modal.addEventListener("change", updateDependentFields);
 
     modal.querySelector("form").addEventListener("submit", (e) => {
       e.preventDefault();
@@ -608,18 +623,32 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
     document.addEventListener("keydown", handleEsc);
     document.body.appendChild(modal);
-    modal.querySelector("input")?.focus();
+    updateDependentFields();
+    modal.querySelector("input, select")?.focus();
   }
 
   // ─── Prompt openers ───
 
-  function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration) {
-    openFormPrompt(title, [
+  function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration, allowNoAnesthesia = false) {
+    const fields = [
       { name: "dientes", label: "Dientes", value: "" },
-      { name: "carpules", label: "Carpules en total", value: String(defaultCarpules) },
-      { name: "tecnica", label: "Técnica anestésica", value: defaultTecnica },
+      { name: "carpules", label: "Carpules en total", value: String(defaultCarpules), dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
+      { name: "tecnica", label: "Técnica anestésica", value: defaultTecnica, dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
       { name: "duracion", label: "Duración de la cita (minutos)", value: String(defaultDuration) }
-    ], (values) => insertText(builder(values)));
+    ];
+    if (allowNoAnesthesia) {
+      fields.splice(1, 0, {
+        name: "usarAnestesia",
+        label: "Anestesia",
+        type: "select",
+        value: "con",
+        options: [
+          { value: "con", label: "Con anestesia" },
+          { value: "sin", label: "Sin anestesia" }
+        ]
+      });
+    }
+    openFormPrompt(title, fields, (values) => insertText(builder(values)));
   }
 
   function openAlargamientoPrompt() {
@@ -668,7 +697,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       insertText(buildValoracionText());
       return;
     }
-    if (label === "Alisado cerrado") { openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45); return; }
+    if (label === "Alisado cerrado") { openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45, true); return; }
     if (label === "Alisado abierto") { openAlisadoPrompt("Alisado abierto", buildAlisadoAbiertoText, 2, "Infiltrativa", 60); return; }
     if (label === "Alargamiento") { openAlargamientoPrompt(); return; }
     if (label === "Detartraje") { openDetartrajePrompt(); return; }
