@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.5.0
+// @version      2.6.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -63,6 +63,69 @@
     return TARGET_PATHS.some((path) => path.test(location.pathname));
   }
 
+  function normalizePlanText(text) {
+    return String(text || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  function treatmentCategory(cups, procedure) {
+    const normalizedProcedure = normalizePlanText(procedure).toUpperCase();
+    if (cups === "240301" || normalizedProcedure.includes("CAMPO CERRADO")) return "closed";
+    if (cups === "242201" || normalizedProcedure.includes("CAMPO ABIERTO")) return "open";
+    return "";
+  }
+
+  function toothFromTreatmentRow(row) {
+    const text = normalizePlanText(row?.querySelector(".row-pieza")?.textContent);
+    const match = text.match(/\b([1-4])\s*[.]?\s*([1-8])\b/);
+    return match ? `${match[1]}${match[2]}` : "";
+  }
+
+  function getOpenTreatmentContext(category) {
+    const planId = location.pathname.match(/\/tratamiento\/(\d+)\b/i)?.[1] || "";
+    if (!planId || !category) return null;
+
+    const items = [...document.querySelectorAll(".row-nombre")].map((nameCell) => {
+      const row = nameCell.parentElement;
+      const rawName = normalizePlanText(nameCell.textContent);
+      const nameMatch = rawName.match(/^\[(\d+)\]\s*(.+)$/);
+      const cups = nameMatch?.[1] || "";
+      const procedure = normalizePlanText(nameMatch?.[2] || rawName);
+      return {
+        cups,
+        procedure,
+        tooth: toothFromTreatmentRow(row),
+        category: treatmentCategory(cups, procedure)
+      };
+    }).filter((item) => item.category === category && item.tooth);
+
+    if (!items.length) return null;
+
+    const teeth = [...new Set(items.map((item) => item.tooth))]
+      .sort((a, b) => Number(a) - Number(b));
+    const firstItem = items[0];
+    const planTitle = [...document.querySelectorAll("h2")]
+      .map((heading) => normalizePlanText(heading.textContent).replace(/[\uE000-\uF8FF]+$/g, "").trim())
+      .find((text) => /^\d{4}[/-]\d{2}[/-]\d{2}\b/.test(text)) || "";
+
+    return {
+      planId,
+      planTitle,
+      cups: firstItem.cups,
+      procedure: firstItem.procedure,
+      teeth
+    };
+  }
+
+  function treatmentContextText(context) {
+    if (!context) return "";
+    const parts = [
+      `Plan #${context.planId}${context.planTitle ? ` — ${context.planTitle}` : ""}`,
+      context.cups ? `[${context.cups}] ${context.procedure}` : context.procedure,
+      `Dientes: ${context.teeth.join(", ")}`
+    ];
+    return parts.filter(Boolean).join(" · ");
+  }
+
   function getSavedPeriodontalSummary() {
     const patientId = getPatientIdFromUrl();
     if (!patientId) return "";
@@ -96,6 +159,64 @@
     const end = new Date();
     const start = new Date(end.getTime() - durationMinutes * 60 * 1000);
     return { start: formatHour(start), end: formatHour(end) };
+  }
+
+  function parseTeeth(text) {
+    return [...new Set(
+      (String(text || "").match(/\b[1-4][1-8]\b/g) || []).map(Number)
+    )];
+  }
+
+  function formatAnesthesiaTechniques(techniques) {
+    const orderedTechniques = [
+      "Alveolar anterior",
+      "Alveolar medio",
+      "Alveolar posterior",
+      "Alveolar inferior",
+      "Nasopalatino",
+      "Palatino mayor",
+      "Lingual",
+      "Dentario"
+    ].filter((technique) => techniques.has(technique));
+
+    const displayParts = orderedTechniques.map((technique, index) => {
+      if (index > 0 && technique.startsWith("Alveolar ")) {
+        return technique.replace(/^Alveolar\s+/, "").toLowerCase();
+      }
+      return index > 0 ? technique.toLowerCase() : technique;
+    });
+
+    if (displayParts.length <= 1) return displayParts[0] || "";
+    return `${displayParts.slice(0, -1).join(", ")} y ${displayParts[displayParts.length - 1]}`;
+  }
+
+  function suggestAnesthesiaTechnique(teethText) {
+    const techniques = new Set();
+
+    parseTeeth(teethText).forEach((tooth) => {
+      const quadrant = Math.trunc(tooth / 10);
+      const position = tooth % 10;
+
+      if (quadrant === 1 || quadrant === 2) {
+        if (position <= 3) {
+          techniques.add("Alveolar anterior");
+          techniques.add("Nasopalatino");
+        } else if (position <= 5) {
+          techniques.add("Alveolar medio");
+          techniques.add("Palatino mayor");
+        } else {
+          techniques.add("Alveolar posterior");
+          techniques.add("Palatino mayor");
+        }
+        return;
+      }
+
+      techniques.add("Alveolar inferior");
+      techniques.add("Lingual");
+      if (position >= 6) techniques.add("Dentario");
+    });
+
+    return formatAnesthesiaTechniques(techniques);
   }
 
   function dispatchEditorEvents(editor, text) {
@@ -550,6 +671,10 @@ ATENDIDO POR: ${CONFIG.doctor}`;
         box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25); padding: 16px;
       }
       #${MODAL_ID} h3 { margin: 0 0 12px; color: #0f172a; font-size: 16px; }
+      #${MODAL_ID} .treatment-context {
+        margin: -4px 0 12px; border-radius: 5px; background: #f0f9ff; color: #075985;
+        font-size: 12px; line-height: 1.35; padding: 8px;
+      }
       #${MODAL_ID} label { display: block; margin: 8px 0 4px; color: #475569; font-size: 12px; font-weight: 700; }
       #${MODAL_ID} input, #${MODAL_ID} select {
         box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 5px; padding: 8px; font-size: 13px;
@@ -568,7 +693,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
   function closePrompt() { document.getElementById(MODAL_ID)?.remove(); }
 
-  function openFormPrompt(title, fields, onSubmit) {
+  function openFormPrompt(title, fields, onSubmit, contextText = "") {
     ensureStyles();
     closePrompt();
 
@@ -577,12 +702,13 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     modal.innerHTML = `
       <form class="box">
         <h3>${escapeHtml(title)}</h3>
+        ${contextText ? `<div class="treatment-context">${escapeHtml(contextText)}</div>` : ""}
         ${fields.map((f) => `
           <div class="field"${f.dependsOn ? ` data-depends-on="${escapeHtml(f.dependsOn.name)}" data-depends-value="${escapeHtml(f.dependsOn.value)}"` : ""}>
             <label for="dlk-evo-${f.name}">${escapeHtml(f.label)}</label>
             ${f.type === "select"
               ? `<select id="dlk-evo-${f.name}" name="${f.name}">${f.options.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === f.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`
-              : `<input id="dlk-evo-${f.name}" name="${f.name}" autocomplete="off" value="${escapeHtml(f.value || "")}">`}
+              : `<input id="dlk-evo-${f.name}" name="${f.name}" autocomplete="off" value="${escapeHtml(f.value || "")}"${f.autoAnesthesiaFrom ? ` data-auto-anesthesia-from="${escapeHtml(f.autoAnesthesiaFrom)}" data-auto-anesthesia-default="${escapeHtml(f.value || "")}"` : ""}>`}
           </div>
         `).join("")}
         <div class="actions">
@@ -624,16 +750,29 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     document.addEventListener("keydown", handleEsc);
     document.body.appendChild(modal);
     updateDependentFields();
+
+    modal.querySelectorAll("[data-auto-anesthesia-from]").forEach((techniqueInput) => {
+      const teethInput = modal.querySelector(`[name="${techniqueInput.dataset.autoAnesthesiaFrom}"]`);
+      if (!teethInput) return;
+      const updateAnesthesiaSuggestion = () => {
+        const suggestion = suggestAnesthesiaTechnique(teethInput.value);
+        techniqueInput.value = suggestion || techniqueInput.dataset.autoAnesthesiaDefault || "";
+      };
+      teethInput.addEventListener("input", updateAnesthesiaSuggestion);
+      updateAnesthesiaSuggestion();
+    });
+
     modal.querySelector("input, select")?.focus();
   }
 
   // ─── Prompt openers ───
 
-  function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration, allowNoAnesthesia = false) {
+  function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration, allowNoAnesthesia = false, category = "") {
+    const treatmentContext = getOpenTreatmentContext(category);
     const fields = [
-      { name: "dientes", label: "Dientes", value: "" },
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "" },
       { name: "carpules", label: "Carpules en total", value: String(defaultCarpules), dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
-      { name: "tecnica", label: "Técnica anestésica", value: defaultTecnica, dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
+      { name: "tecnica", label: "Técnica anestésica", value: defaultTecnica, autoAnesthesiaFrom: "dientes", dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
       { name: "duracion", label: "Duración de la cita (minutos)", value: String(defaultDuration) }
     ];
     if (allowNoAnesthesia) {
@@ -648,7 +787,12 @@ ATENDIDO POR: ${CONFIG.doctor}`;
         ]
       });
     }
-    openFormPrompt(title, fields, (values) => insertText(builder(values)));
+    openFormPrompt(
+      title,
+      fields,
+      (values) => insertText(builder(values)),
+      treatmentContextText(treatmentContext)
+    );
   }
 
   function openAlargamientoPrompt() {
@@ -697,8 +841,8 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       insertText(buildValoracionText());
       return;
     }
-    if (label === "Alisado cerrado") { openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45, true); return; }
-    if (label === "Alisado abierto") { openAlisadoPrompt("Alisado abierto", buildAlisadoAbiertoText, 2, "Infiltrativa", 60); return; }
+    if (label === "Alisado cerrado") { openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45, true, "closed"); return; }
+    if (label === "Alisado abierto") { openAlisadoPrompt("Alisado abierto", buildAlisadoAbiertoText, 2, "Infiltrativa", 60, false, "open"); return; }
     if (label === "Alargamiento") { openAlargamientoPrompt(); return; }
     if (label === "Detartraje") { openDetartrajePrompt(); return; }
     if (label === "Ajuste oclusal") { openAjusteOclusalPrompt(); return; }
