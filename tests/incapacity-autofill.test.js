@@ -102,3 +102,13 @@ test("conserva las recomendaciones y el profesional solicitados", () => {
     helpers.PROFESSIONAL_MATCH
   );
 });
+
+test("marca enfermedad general como origen de la incapacidad", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "Dentalink - Autollenado certificado de incapacidad.user.js"),
+    "utf8"
+  );
+
+  assert.match(source, /findControl\(\/\^ORIGEN DE LA INCAPACIDAD\$\/,\s*'input\[type="checkbox"\]'\)/);
+  assert.match(source, /setCheckbox\(disabilityOrigin,\s*true\)/);
+});

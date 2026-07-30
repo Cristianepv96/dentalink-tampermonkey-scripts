@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Autollenado certificado de incapacidad
 // @namespace    https://odontofamily.local/dentalink-incapacidad
-// @version      1.0.0
+// @version      1.0.1
 // @description  Rellena automáticamente el certificado de incapacidad de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -22,7 +22,7 @@
     watchPage
   } = window.__dlkUtils;
 
-  const SCRIPT_VERSION = "1.0.0";
+  const SCRIPT_VERSION = "1.0.1";
   const TARGET_PATH = /\/pacientes\/\d+\/ficha\/formularios\/nuevo\/29\b/i;
   const PROFESSIONAL_MATCH = /CRISTIAN EDUARDO PENA VILLAMIZAR RM 1093788088.*PERIODONCIA/;
   const RECOMMENDATIONS = [
@@ -167,6 +167,7 @@
     const initialDate = findControl(/^FECHA INICIAL$/, "input, textarea");
     const finalDate = findControl(/^FECHA FINAL$/, "input, textarea");
     const disabilityDays = findControl(/^DIAS DE INCAPACIDAD$/, "input, textarea");
+    const disabilityOrigin = findControl(/^ORIGEN DE LA INCAPACIDAD$/, 'input[type="checkbox"]');
     const concept = findControl(/^CONCEPTO DE LA INCAPACIDAD$/, "select");
     const recommendations = findControl(/^RECOMENDACIONES$/, "input, textarea");
     const professionalInformation = findControl(/^INFORMACION DEL PROFESIONAL$/, "input, textarea");
@@ -180,6 +181,7 @@
     completed += Number(setTextControl(initialDate, formatDate(today, initialDate)));
     completed += Number(setTextControl(finalDate, formatDate(tomorrow, finalDate)));
     completed += Number(setTextControl(disabilityDays, "2"));
+    completed += Number(setCheckbox(disabilityOrigin, true));
     completed += Number(setSelect(concept, "Común"));
     completed += Number(setTextControl(recommendations, RECOMMENDATIONS));
     completed += Number(setTextControl(professionalInformation, ""));
