@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      2.6.0
+// @version      3.0.2
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.1
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -15,7 +15,53 @@
 (function () {
   "use strict";
 
-  const { isVisible, escapeHtml, getPatientIdFromUrl, watchPage } = window.__dlkUtils;
+  const sharedUtils = window.__dlkUtils || {};
+  const FALLBACK_TREATMENTS = [
+    { key: "closed", cups: "240301", scope: "tooth", patterns: ["CAMPO CERRADO"] },
+    { key: "open", cups: "242201", scope: "tooth", patterns: ["CAMPO ABIERTO"] },
+    { key: "drainage", cups: "240401", scope: "tooth", patterns: ["DRENAJE PERIODONTAL"] },
+    { key: "scaling", cups: "240201", scope: "tooth", patterns: ["DETARTRAJE"] },
+    { key: "occlusal_adjustment", cups: "248201", scope: "tooth", patterns: ["AJUSTE OCLUSAL"] },
+    { key: "crown_lengthening", cups: "242301", scope: "tooth", patterns: ["ALARGAMIENTO DE CORONA"] },
+    { key: "frenectomy", cups: "274101", scope: "procedure", patterns: ["FRENILLECTOMIA", "FRENILLECTOMÍA"] }
+  ];
+  const fallbackIdentifyTreatment = (value) => {
+    const normalized = String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .toUpperCase();
+    return FALLBACK_TREATMENTS.find((treatment) =>
+      normalized.includes(treatment.cups)
+      || treatment.patterns.some((pattern) => normalized.includes(
+        pattern.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      ))
+    ) || null;
+  };
+  const HAS_PERIODONTAL_PROGRESS_API = [
+    "calculatePeriodontalProgress",
+    "applyPeriodontalCompletion",
+    "formatPeriodontalProgressNote",
+    "loadPeriodontalProgress"
+  ].every((name) => typeof sharedUtils[name] === "function");
+  const {
+    isVisible,
+    escapeHtml,
+    getPatientIdFromUrl,
+    watchPage,
+  } = sharedUtils;
+  const identifyPeriodontalTreatment = sharedUtils.identifyPeriodontalTreatment
+    || fallbackIdentifyTreatment;
+  const periodontalTreatmentByKey = sharedUtils.periodontalTreatmentByKey
+    || ((key) => FALLBACK_TREATMENTS.find((treatment) => treatment.key === key) || null);
+  const calculatePeriodontalProgress = sharedUtils.calculatePeriodontalProgress
+    || (() => null);
+  const applyPeriodontalCompletion = sharedUtils.applyPeriodontalCompletion
+    || ((progress) => progress || null);
+  const formatPeriodontalProgressNote = sharedUtils.formatPeriodontalProgressNote
+    || (() => "");
+  const loadPeriodontalProgress = sharedUtils.loadPeriodontalProgress
+    || (() => null);
 
   // ═══════════════════════════════════════════════════════════════════════
   // CONFIGURACIÓN CLÍNICA (editar aquí los textos frecuentes)
@@ -40,7 +86,23 @@
   const MODAL_ID = "dlk-evo-periodoncia-modal";
   const STYLE_ID = "dlk-evo-periodoncia-style";
   const UNDO_ID = "dlk-evo-periodoncia-undo";
+  const ANAMNESIS_BADGE_ID = "dlk-evo-anamnesis-status";
+  const PROGRESS_BADGE_ID = "dlk-evo-periodontal-progress";
   const PERIO_STORAGE_KEY = "dlk_periodontograma_resumen_v1";
+  const ANAMNESIS_STORAGE_KEY = "dlk_anamnesis_context_v1";
+  const ANAMNESIS_PATH = /\/pacientes\/\d+\/ficha\/antecedentes\b/i;
+  const ANAMNESIS_FIELD_LABELS = [
+    "Motivo de consulta",
+    "Enfermedad actual",
+    "Alertas médicas",
+    "Enfermedades",
+    "Medicamentos",
+    "Hábitos",
+    "Antecedentes odontológicos",
+    "Antecedentes familiares",
+    "Comentarios"
+  ];
+  const AUTO_PROMPT_CONTEXT_TTL_MS = 90 * 1000;
   const TARGET_PATHS = [
     /\/pacientes\/\d+\/tratamiento\/\d+\b/i,
     /\/pacientes\/\d+\/ficha\/evoluciones\b/i
@@ -56,6 +118,8 @@
     "Control",
     "Frenillectomía"
   ];
+  let pendingTreatmentSelection = null;
+  let lastAnamnesisSignature = "";
 
   // ─── Helpers ───
 
@@ -68,10 +132,62 @@
   }
 
   function treatmentCategory(cups, procedure) {
-    const normalizedProcedure = normalizePlanText(procedure).toUpperCase();
-    if (cups === "240301" || normalizedProcedure.includes("CAMPO CERRADO")) return "closed";
-    if (cups === "242201" || normalizedProcedure.includes("CAMPO ABIERTO")) return "open";
-    return "";
+    return identifyPeriodontalTreatment(`${cups} ${procedure}`)?.key || "";
+  }
+
+  function treatmentRowFromElement(element) {
+    let current = element;
+    while (current && current !== document.body) {
+      if (
+        current.querySelector?.(":scope > .row-nombre") &&
+        current.querySelector?.(":scope > .row-pieza")
+      ) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function treatmentItemFromRow(row) {
+    const nameCell = row?.querySelector(":scope > .row-nombre") || row?.querySelector(".row-nombre");
+    const rawName = normalizePlanText(nameCell?.textContent);
+    const nameMatch = rawName.match(/^\[(\d+)\]\s*(.+)$/);
+    const cups = nameMatch?.[1] || "";
+    const procedure = normalizePlanText(nameMatch?.[2] || rawName);
+    return {
+      cups,
+      procedure,
+      tooth: toothFromTreatmentRow(row),
+      category: treatmentCategory(cups, procedure)
+    };
+  }
+
+  function rememberTreatmentSelection(event) {
+    const target = event.target instanceof Element
+      ? event.target.closest(".no-realizada")
+      : null;
+    if (!target) return;
+
+    const row = treatmentRowFromElement(target);
+    const item = treatmentItemFromRow(row);
+    if (!item.category) return;
+
+    pendingTreatmentSelection = {
+      ...item,
+      href: location.href,
+      capturedAt: Date.now()
+    };
+  }
+
+  function consumeTreatmentSelection() {
+    const selection = pendingTreatmentSelection;
+    if (!selection) return null;
+
+    pendingTreatmentSelection = null;
+    const isExpired = Date.now() - selection.capturedAt > AUTO_PROMPT_CONTEXT_TTL_MS;
+    if (isExpired || selection.href !== location.href) return null;
+    return selection;
   }
 
   function toothFromTreatmentRow(row) {
@@ -83,24 +199,19 @@
   function getOpenTreatmentContext(category) {
     const planId = location.pathname.match(/\/tratamiento\/(\d+)\b/i)?.[1] || "";
     if (!planId || !category) return null;
+    const treatment = periodontalTreatmentByKey(category);
 
-    const items = [...document.querySelectorAll(".row-nombre")].map((nameCell) => {
-      const row = nameCell.parentElement;
-      const rawName = normalizePlanText(nameCell.textContent);
-      const nameMatch = rawName.match(/^\[(\d+)\]\s*(.+)$/);
-      const cups = nameMatch?.[1] || "";
-      const procedure = normalizePlanText(nameMatch?.[2] || rawName);
-      return {
-        cups,
-        procedure,
-        tooth: toothFromTreatmentRow(row),
-        category: treatmentCategory(cups, procedure)
-      };
-    }).filter((item) => item.category === category && item.tooth);
+    const rows = [...document.querySelectorAll(".row-nombre")]
+      .map((nameCell) => nameCell.parentElement);
+    const pendingRows = rows.filter((row) => row.querySelector(".no-realizada"));
+    const items = (pendingRows.length ? pendingRows : rows)
+      .map((row) => treatmentItemFromRow(row))
+      .filter((item) => item.category === category
+        && (treatment?.scope === "procedure" || item.tooth));
 
     if (!items.length) return null;
 
-    const teeth = [...new Set(items.map((item) => item.tooth))]
+    const teeth = [...new Set(items.map((item) => item.tooth).filter(Boolean))]
       .sort((a, b) => Number(a) - Number(b));
     const firstItem = items[0];
     const planTitle = [...document.querySelectorAll("h2")]
@@ -133,6 +244,144 @@
       const records = JSON.parse(localStorage.getItem(PERIO_STORAGE_KEY) || "{}");
       return records?.[patientId]?.text || "";
     } catch (_) { return ""; }
+  }
+
+  function getCurrentPeriodontalProgress() {
+    const patientId = getPatientIdFromUrl();
+    const storedProgress = loadPeriodontalProgress(patientId);
+    const savedValuation = getSavedPeriodontalSummary();
+    const valuationProgress = savedValuation
+      ? calculatePeriodontalProgress(savedValuation)
+      : null;
+    const planRows = [...document.querySelectorAll(".row-nombre")]
+      .map((nameCell) => nameCell.parentElement)
+      .map((row) => ({
+        item: treatmentItemFromRow(row),
+        pending: Boolean(row.querySelector(".no-realizada"))
+      }))
+      .filter(({ item }) => item.category);
+    const planText = planRows.length
+      ? [
+        "Se solicita autorización para realizar:",
+        ...planRows.map(({ item }) =>
+          `- [${item.cups}] ${item.procedure}${item.tooth ? ` en ${item.tooth}` : ""}.`)
+      ].join("\n")
+      : "";
+    let planProgress = planText ? calculatePeriodontalProgress(planText) : null;
+    const planItemKey = (item) => `${item.category}|${item.tooth || "procedimiento"}`;
+    const pendingPlanItems = new Set(
+      planRows.filter(({ pending }) => pending).map(({ item }) => planItemKey(item))
+    );
+    planRows.filter(({ pending, item }) => !pending && !pendingPlanItems.has(planItemKey(item)))
+      .forEach(({ item }) => {
+      planProgress = applyPeriodontalCompletion(planProgress, item.category, item.tooth);
+      });
+    return planProgress || storedProgress || valuationProgress;
+  }
+
+  function appendPeriodontalProgressNote(text, progress) {
+    const note = formatPeriodontalProgressNote(progress);
+    if (!note || text.includes("ESTADO DEL TRATAMIENTO PERIODONTAL")
+      || text.includes("TRATAMIENTO PERIODONTAL PENDIENTE")) return text;
+
+    const providerMarker = "\n\nATENDIDO POR:";
+    const providerIndex = text.lastIndexOf(providerMarker);
+    if (providerIndex === -1) return `${text}\n\n${note}`;
+    return `${text.slice(0, providerIndex)}\n\n${note}${text.slice(providerIndex)}`;
+  }
+
+  function insertTreatmentText(text, treatmentKey = "", teeth = "") {
+    const currentProgress = getCurrentPeriodontalProgress();
+    const resultingProgress = treatmentKey
+      ? applyPeriodontalCompletion(currentProgress, treatmentKey, teeth)
+      : currentProgress;
+    return insertText(appendPeriodontalProgressNote(text, resultingProgress));
+  }
+
+  function isAnamnesisPage() {
+    return ANAMNESIS_PATH.test(location.pathname);
+  }
+
+  function getAnamnesisSectionLabel(textarea) {
+    if (textarea.id === "comentarios") return "Comentarios";
+
+    let current = textarea.parentElement;
+    while (current && current !== document.body) {
+      const text = normalizePlanText(current.textContent);
+      const label = ANAMNESIS_FIELD_LABELS.find((candidate) => text.startsWith(candidate));
+      const hasSearch = current.querySelector?.("input[placeholder^='Buscar']");
+      const hasSingleTextarea = current.querySelectorAll?.("textarea").length === 1;
+      if (label && hasSearch && hasSingleTextarea) return label;
+      current = current.parentElement;
+    }
+    return "";
+  }
+
+  function readAnamnesisRecords() {
+    try {
+      const records = JSON.parse(sessionStorage.getItem(ANAMNESIS_STORAGE_KEY) || "{}");
+      return records && typeof records === "object" && !Array.isArray(records) ? records : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function getSavedAnamnesisContext() {
+    const patientId = getPatientIdFromUrl();
+    if (!patientId) return null;
+    return readAnamnesisRecords()?.[patientId] || null;
+  }
+
+  function captureAnamnesisContext() {
+    if (!isAnamnesisPage()) return;
+    const patientId = getPatientIdFromUrl();
+    if (!patientId) return;
+
+    const fields = {};
+    document.querySelectorAll("main textarea").forEach((textarea) => {
+      const label = getAnamnesisSectionLabel(textarea);
+      if (!label) return;
+      fields[label] = normalizePlanText(textarea.value);
+    });
+
+    // Evita reemplazar un registro completo mientras Dentalink todavía está
+    // cargando parcialmente la ficha.
+    if (Object.keys(fields).length < 8) return;
+
+    const signature = `${patientId}:${JSON.stringify(fields)}`;
+    if (signature === lastAnamnesisSignature) return;
+
+    try {
+      const records = readAnamnesisRecords();
+      records[patientId] = {
+        fields,
+        capturedAt: Date.now()
+      };
+      sessionStorage.setItem(ANAMNESIS_STORAGE_KEY, JSON.stringify(records));
+      lastAnamnesisSignature = signature;
+    } catch (_) { /* La evolución funciona también si el almacenamiento está bloqueado. */ }
+  }
+
+  function formatAnamnesisContext(record) {
+    const lines = ANAMNESIS_FIELD_LABELS
+      .map((label) => {
+        const value = normalizePlanText(record?.fields?.[label]);
+        return value ? `${label}: ${value}` : "";
+      })
+      .filter(Boolean);
+
+    if (!lines.length) return "";
+    return `CONTEXTO REGISTRADO EN FICHA ANAMNESIS
+${lines.join("\n")}`;
+  }
+
+  function enrichWithAnamnesis(text) {
+    const context = formatAnamnesisContext(getSavedAnamnesisContext());
+    if (!context || text.includes("CONTEXTO REGISTRADO EN FICHA ANAMNESIS")) return text;
+
+    const firstSectionBreak = text.indexOf("\n\n");
+    if (firstSectionBreak === -1) return `${context}\n\n${text}`;
+    return `${text.slice(0, firstSectionBreak)}\n\n${context}\n\n${text.slice(firstSectionBreak + 2)}`;
   }
 
   function getEditor() {
@@ -272,9 +521,10 @@
       alert("No se encontró el editor de evolución.");
       return false;
     }
+    const enrichedText = enrichWithAnamnesis(text);
     const previousHtml = editor.innerHTML;
-    insertHtmlInEditor(editor, linesToHtml(text));
-    dispatchEditorEvents(editor, text);
+    insertHtmlInEditor(editor, linesToHtml(enrichedText));
+    dispatchEditorEvents(editor, enrichedText);
     showUndoButton(editor, previousHtml, onUndo);
     return true;
   }
@@ -427,12 +677,41 @@ Recomendaciones: Reposo moderado (48h), dieta fría/blanda, no escupir, no fumar
 ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
-  function buildValoracionText() {
+  function buildAdditionalValuationRequests(values = {}) {
+    const requestLines = [];
+    const addToothRequest = (value, cups, label) => {
+      const teeth = normalizePlanText(value);
+      if (teeth) requestLines.push(`- [${cups}] ${label} en ${teeth}.`);
+    };
+
+    addToothRequest(values.detartraje, "240201", "Detartraje subgingival");
+    addToothRequest(values.alargamiento, "242301", "Alargamiento de corona clínica");
+    if (values.frenillo && values.frenillo !== "no") {
+      requestLines.push(`- [274101] Frenillectomía ${values.frenillo}.`);
+    }
+    return requestLines;
+  }
+
+  function appendAdditionalRequests(summary, requestLines) {
+    if (!requestLines.length) return summary;
+    if (/Se solicita autorizaci[oó]n para realizar\s*:/i.test(summary)) {
+      return `${summary}\n${requestLines.join("\n")}`;
+    }
+    return [
+      summary,
+      "",
+      "Se solicita autorización para realizar:",
+      requestLines.join("\n")
+    ].join("\n");
+  }
+
+  function buildValoracionText(values = {}) {
     const periodontalSummary = getSavedPeriodontalSummary();
+    const additionalRequests = buildAdditionalValuationRequests(values);
     if (periodontalSummary) {
       return `Paciente acude a cita de valoración especializada por periodoncia, se observan deficiencias en higiene oral, sangrado al sondaje e inflamación generalizada, requiriendo manejo con periodoncia para evitar exacerbación de la enfermedad periodontal. Al sondaje se observan bolsas periodontales en dientes:
 
-${periodontalSummary}
+${appendAdditionalRequests(periodontalSummary, additionalRequests)}
 
 ${CONFIG.notaControles}
 
@@ -443,6 +722,7 @@ Cita 20 min`;
 Se sugiere realizar 
 
 Se solicita autorización para realizar:
+${additionalRequests.length ? `\n${additionalRequests.join("\n")}` : ""}
 
 ${CONFIG.notaControles}
 
@@ -655,6 +935,16 @@ ATENDIDO POR: ${CONFIG.doctor}`;
         cursor: pointer; font: 700 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; padding: 6px 8px;
       }
       #${PANEL_ID} button:hover { border-color: #0284c7; color: #0369a1; }
+      #${ANAMNESIS_BADGE_ID}, #${PROGRESS_BADGE_ID} {
+        box-sizing: border-box; flex: 0 0 100%; border-radius: 5px; padding: 6px 8px;
+        font-size: 11px; font-weight: 700; line-height: 1.25;
+      }
+      #${ANAMNESIS_BADGE_ID}.available { background: #ecfdf5; color: #047857; }
+      #${ANAMNESIS_BADGE_ID}.empty { background: #f8fafc; color: #64748b; }
+      #${ANAMNESIS_BADGE_ID}.missing { background: #fff7ed; color: #c2410c; }
+      #${PROGRESS_BADGE_ID}.controlled { background: #ecfdf5; color: #047857; }
+      #${PROGRESS_BADGE_ID}.pending { background: #fff7ed; color: #c2410c; }
+      #${PROGRESS_BADGE_ID}.missing { background: #f8fafc; color: #64748b; }
       #${UNDO_ID} {
         border: 1px solid #f97316; border-radius: 5px; background: #fff7ed; color: #c2410c;
         cursor: pointer; font: 700 12px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
@@ -668,6 +958,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       }
       #${MODAL_ID} .box {
         width: min(420px, calc(100vw - 32px)); border-radius: 8px; background: #fff;
+        max-height: calc(100vh - 32px); overflow-y: auto;
         box-shadow: 0 20px 60px rgba(15, 23, 42, 0.25); padding: 16px;
       }
       #${MODAL_ID} h3 { margin: 0 0 12px; color: #0f172a; font-size: 16px; }
@@ -767,6 +1058,26 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
   // ─── Prompt openers ───
 
+  function openValoracionPrompt() {
+    openFormPrompt("Valoración periodontal", [
+      { name: "detartraje", label: "Detartraje subgingival · dientes (opcional)", value: "" },
+      { name: "alargamiento", label: "Alargamiento de corona · dientes (opcional)", value: "" },
+      {
+        name: "frenillo",
+        label: "Frenillectomía (opcional)",
+        type: "select",
+        value: "no",
+        options: [
+          { value: "no", label: "No solicitar" },
+          { value: "labial superior", label: "Labial superior" },
+          { value: "labial inferior", label: "Labial inferior" },
+          { value: "lingual", label: "Lingual" }
+        ]
+      }
+    ], (values) => insertText(buildValoracionText(values)),
+    "Campo cerrado, campo abierto, drenaje y ajuste oclusal se incluyen automáticamente desde el periodontograma.");
+  }
+
   function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration, allowNoAnesthesia = false, category = "") {
     const treatmentContext = getOpenTreatmentContext(category);
     const fields = [
@@ -790,55 +1101,99 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     openFormPrompt(
       title,
       fields,
-      (values) => insertText(builder(values)),
+      (values) => insertTreatmentText(builder(values), category, values.dientes),
       treatmentContextText(treatmentContext)
     );
   }
 
   function openAlargamientoPrompt() {
+    const treatmentContext = getOpenTreatmentContext("crown_lengthening");
     openFormPrompt("Alargamiento", [
-      { name: "diente", label: "Diente", value: "" },
+      { name: "diente", label: "Diente", value: treatmentContext?.teeth[0] || "" },
       { name: "restauracion", label: "Restauración", value: "" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "60" }
-    ], (values) => insertText(buildAlargamientoText(values)));
+    ], (values) => insertTreatmentText(
+      buildAlargamientoText(values),
+      "crown_lengthening",
+      values.diente
+    ), treatmentContextText(treatmentContext));
   }
 
   function openDetartrajePrompt() {
+    const treatmentContext = getOpenTreatmentContext("scaling");
     openFormPrompt("Detartraje", [
-      { name: "dientes", label: "Dientes", value: "" },
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
-    ], (values) => insertText(buildDetartrajeText(values)));
+    ], (values) => insertTreatmentText(
+      buildDetartrajeText(values),
+      "scaling",
+      values.dientes
+    ), treatmentContextText(treatmentContext));
   }
 
   function openAjusteOclusalPrompt() {
+    const treatmentContext = getOpenTreatmentContext("occlusal_adjustment");
     openFormPrompt("Ajuste oclusal", [
-      { name: "dientes", label: "Dientes", value: "" }
-    ], (values) => insertText(buildAjusteOclusalText(values)));
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "" }
+    ], (values) => insertTreatmentText(
+      buildAjusteOclusalText(values),
+      "occlusal_adjustment",
+      values.dientes
+    ), treatmentContextText(treatmentContext));
   }
 
   function openDrenajePrompt() {
+    const treatmentContext = getOpenTreatmentContext("drainage");
     openFormPrompt("Drenaje periodontal", [
-      { name: "dientes", label: "Dientes", value: "" }
-    ], (values) => insertText(buildDrenajeText(values)));
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "" }
+    ], (values) => insertTreatmentText(
+      buildDrenajeText(values),
+      "drainage",
+      values.dientes
+    ), treatmentContextText(treatmentContext));
   }
 
   function openFrenillectomiaPrompt() {
+    const treatmentContext = getOpenTreatmentContext("frenectomy");
     openFormPrompt("Frenillectomía", [
       { name: "frenillo", label: "Tipo de frenillo (labial superior, labial inferior, lingual)", value: "labial superior" },
       { name: "carpules", label: "Carpules en total", value: "1" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
-    ], (values) => insertText(buildFrenillectomiaText(values)));
+    ], (values) => insertTreatmentText(
+      buildFrenillectomiaText(values),
+      "frenectomy"
+    ), treatmentContextText(treatmentContext));
   }
 
   // ═══════════════════════════════════════════════════════════════════════
   // BUTTON HANDLERS & PANEL
   // ═══════════════════════════════════════════════════════════════════════
 
+  function openPromptForRememberedTreatment() {
+    if (document.getElementById(MODAL_ID)) return;
+    const selection = consumeTreatmentSelection();
+    if (!selection) return;
+
+    if (selection.category === "closed") {
+      openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45, true, "closed");
+      return;
+    }
+    if (selection.category === "open") {
+      openAlisadoPrompt("Alisado abierto", buildAlisadoAbiertoText, 2, "Infiltrativa", 60, false, "open");
+      return;
+    }
+    if (selection.category === "crown_lengthening") { openAlargamientoPrompt(); return; }
+    if (selection.category === "scaling") { openDetartrajePrompt(); return; }
+    if (selection.category === "occlusal_adjustment") { openAjusteOclusalPrompt(); return; }
+    if (selection.category === "drainage") { openDrenajePrompt(); return; }
+    if (selection.category === "frenectomy") openFrenillectomiaPrompt();
+  }
+
   function handleButton(label) {
     if (label === "Valoración") {
-      insertText(buildValoracionText());
+      openValoracionPrompt();
       return;
     }
     if (label === "Alisado cerrado") { openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45, true, "closed"); return; }
@@ -847,7 +1202,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     if (label === "Detartraje") { openDetartrajePrompt(); return; }
     if (label === "Ajuste oclusal") { openAjusteOclusalPrompt(); return; }
     if (label === "Drenaje") { openDrenajePrompt(); return; }
-    if (label === "Control") { insertText(buildControlText()); return; }
+    if (label === "Control") { insertTreatmentText(buildControlText()); return; }
     if (label === "Frenillectomía") { openFrenillectomiaPrompt(); return; }
     alert(`Boton "${label}" creado. Falta definir su texto.`);
   }
@@ -868,6 +1223,60 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     document.getElementById(PANEL_ID)?.remove();
   }
 
+  function updateAnamnesisBadge(panel) {
+    const badge = panel.querySelector(`#${ANAMNESIS_BADGE_ID}`);
+    if (!badge) return;
+
+    const record = getSavedAnamnesisContext();
+    const fieldCount = ANAMNESIS_FIELD_LABELS
+      .filter((label) => normalizePlanText(record?.fields?.[label])).length;
+
+    if (!record) {
+      badge.className = "missing";
+      badge.textContent = "Anamnesis no incluida · abra Ficha Anamnesis";
+      badge.title = "La información se conserva solo durante esta sesión del navegador.";
+      return;
+    }
+
+    if (!fieldCount) {
+      badge.className = "empty";
+      badge.textContent = "Anamnesis revisada · sin datos para incluir";
+      return;
+    }
+
+    badge.className = "available";
+    badge.textContent = `✓ Anamnesis incluida (${fieldCount} campos)`;
+    badge.title = record.capturedAt
+      ? `Capturada ${new Date(record.capturedAt).toLocaleString()}`
+      : "";
+  }
+
+  function updateProgressBadge(panel) {
+    const badge = panel.querySelector(`#${PROGRESS_BADGE_ID}`);
+    if (!badge) return;
+    if (!HAS_PERIODONTAL_PROGRESS_API) {
+      badge.className = "missing";
+      badge.textContent = "Avance no disponible · actualice dentalink-utils.js";
+      return;
+    }
+    const progress = getCurrentPeriodontalProgress();
+
+    if (!progress?.total) {
+      badge.className = "missing";
+      badge.textContent = "Avance periodontal no sincronizado · revise Evoluciones";
+      return;
+    }
+
+    if (progress.pendingCount === 0) {
+      badge.className = "controlled";
+      badge.textContent = "✓ Paciente controlado por periodoncia";
+      return;
+    }
+
+    badge.className = "pending";
+    badge.textContent = `${progress.pendingCount} ${progress.pendingCount === 1 ? "tratamiento pendiente" : "tratamientos pendientes"} · ${progress.percent} % completado`;
+  }
+
   function ensurePanel() {
     if (!isTargetPage()) { removePanel(); return; }
     const editor = getEditor();
@@ -878,12 +1287,21 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     if (!panel) {
       panel = document.createElement("div");
       panel.id = PANEL_ID;
+      const badge = document.createElement("span");
+      badge.id = ANAMNESIS_BADGE_ID;
+      panel.appendChild(badge);
+      const progressBadge = document.createElement("span");
+      progressBadge.id = PROGRESS_BADGE_ID;
+      panel.appendChild(progressBadge);
       BUTTONS.forEach((label) => panel.appendChild(createButton(label)));
     }
+    updateAnamnesisBadge(panel);
+    updateProgressBadge(panel);
     const anchor = editor.closest(".sc-fa-dssr") || editor.closest("form") || editor.parentElement || editor;
     if (panel.nextElementSibling !== anchor) {
       anchor.parentElement?.insertBefore(panel, anchor);
     }
+    openPromptForRememberedTreatment();
   }
 
   function schedulePanel() {
@@ -895,10 +1313,26 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     }, 150);
   }
 
+  function scheduleAnamnesisCapture() {
+    if (!isAnamnesisPage() || scheduleAnamnesisCapture.timer) return;
+    scheduleAnamnesisCapture.timer = window.setTimeout(() => {
+      scheduleAnamnesisCapture.timer = null;
+      captureAnamnesisContext();
+    }, 180);
+  }
+
+  function syncPage() {
+    scheduleAnamnesisCapture();
+    schedulePanel();
+  }
+
   // INIT
   // ═══════════════════════════════════════════════════════════════════════
 
-  watchPage(schedulePanel, {
+  document.addEventListener("pointerdown", rememberTreatmentSelection, true);
+  document.addEventListener("input", scheduleAnamnesisCapture, true);
+  document.addEventListener("change", scheduleAnamnesisCapture, true);
+  watchPage(syncPage, {
     delay: 150,
     isStale: () => isTargetPage() && getEditor() && !document.getElementById(PANEL_ID)
   });

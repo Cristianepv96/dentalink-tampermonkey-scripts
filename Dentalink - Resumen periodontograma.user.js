@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Resumen periodontograma
 // @namespace    https://odontofamily.local/dentalink-periodontograma-resumen
-// @version      1.7.1
+// @version      1.8.1
 // @description  Genera resumen de bolsas periodontales, sangrado, movilidad y furca desde el periodontograma.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma.user.js
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.1
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -184,19 +184,19 @@
     const requestLines = [];
 
     if (closedField.length) {
-      requestLines.push(`- Raspaje y alisado radicular a campo cerrado en ${formatToothList(closedField)}${closedCount}.`);
+      requestLines.push(`- [240301] Raspaje y alisado radicular a campo cerrado en ${formatToothList(closedField)}${closedCount}.`);
     }
 
     if (openField.length) {
-      requestLines.push(`- Raspaje y alisado radicular a campo abierto en ${formatToothList(openField)}${openCount}.`);
+      requestLines.push(`- [242201] Raspaje y alisado radicular a campo abierto en ${formatToothList(openField)}${openCount}.`);
     }
 
     exudate.forEach((record) => {
-      requestLines.push(`- Drenaje periodontal en ${record.tooth} con el fin de eliminar exudado periodontal, evitar la pérdida ósea activa que se está produciendo en ese momento y mejorar el pronóstico periodontal.`);
+      requestLines.push(`- [240401] Drenaje periodontal en ${record.tooth} con el fin de eliminar exudado periodontal, evitar la pérdida ósea activa que se está produciendo en ese momento y mejorar el pronóstico periodontal.`);
     });
 
     if (mobility.length) {
-      requestLines.push(`- Ajuste oclusal en ${formatToothList(mobility)} para eliminar contactos prematuros que impiden reducir el riesgo de aumento de la movilidad por trauma oclusal secundario.`);
+      requestLines.push(`- [248201] Ajuste oclusal en ${formatToothList(mobility)} para eliminar contactos prematuros que impiden reducir el riesgo de aumento de la movilidad por trauma oclusal secundario.`);
     }
 
     const result = [

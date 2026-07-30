@@ -7,9 +7,10 @@ Scripts de [Tampermonkey](https://www.tampermonkey.net/) para automatizar tareas
 
 | Script | Descripción | Instalar |
 |---|---|---|
-| **Condensación de evoluciones** | Resume localmente el avance periodontal en la ficha de evoluciones, agrupando tratamientos solicitados y realizados. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js) |
-| **Evoluciones periodoncia** | Botones de textos rápidos para evoluciones de valoración, alisado cerrado/abierto, alargamiento y detartraje. Incluye formularios modales para datos variables (dientes, anestesia, duración). | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js) |
+| **Condensación de evoluciones** | Resume el avance de siete tratamientos periodontales, diferencia pendientes y realizados por pieza y conserva el estado por paciente. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js) |
+| **Evoluciones periodoncia** | Genera valoraciones y evoluciones clínicas, precarga piezas pendientes y agrega el tratamiento restante o el estado de paciente controlado. Puede incorporar la Ficha Anamnesis. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js) |
 | **Autollenado orden de servicio** | Rellena automáticamente los campos base de la orden de servicio (fecha, NRO, origen, prioridad, código K053, tipo de diagnóstico). | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js) |
+| **Autollenado certificado de incapacidad** | Completa el certificado de incapacidad de periodoncia con entidad, lugar, fechas, diagnóstico, recomendaciones y profesional. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20certificado%20de%20incapacidad.user.js) |
 | **Antecedentes por defecto** | Rellena textareas de antecedentes (motivo de consulta, enfermedad actual, antecedentes odontológicos) con textos por defecto cuando están vacíos. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js) |
 | **Botones receta rápida** | Botones para insertar recetas predefinidas (Naproxeno, Amoxicilina, Azitromicina) en el editor de recetas. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js) |
 | **CUPS rápido** | Panel flotante con códigos CUPS comunes (SAVIA SALUD y FOMAG) para insertar rápidamente en la orden de servicio. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20CUPS%20rapido%20orden%20de%20servicio.user.js) |
@@ -104,6 +105,24 @@ const CONFIG = {
 
 Edita estos valores directamente en Tampermonkey para adaptar los textos a tus necesidades.
 
+Para incluir la anamnesis en las evoluciones, abra primero **Ficha Anamnesis** del
+paciente durante la misma sesión del navegador. El panel indicará
+**“Anamnesis incluida”** y agregará los campos diligenciados al siguiente texto
+generado. La información se guarda temporalmente por paciente en la sesión del
+navegador y no se envía a servicios externos.
+
+### Seguimiento del tratamiento periodontal
+
+Los scripts comparten el progreso de alisado a campo cerrado y abierto,
+drenaje, detartraje, ajuste oclusal, alargamiento de corona y frenillectomía.
+La valoración identifica cada solicitud con su código CUPS y permite agregar
+tratamientos complementarios. Cada evolución generada muestra los
+procedimientos que continúan pendientes; cuando se completa el plan agrega
+**“Paciente controlado por periodoncia”**.
+
+Para obtener el estado más reciente, abra la ficha **Evoluciones** del paciente
+antes de generar una nueva evolución desde otro apartado de Dentalink.
+
 ---
 
 ## 📁 Estructura del repositorio
@@ -113,6 +132,7 @@ Edita estos valores directamente en Tampermonkey para adaptar los textos a tus n
 ├── Dentalink - Evoluciones periodoncia.user.js     # Textos rápidos evoluciones
 ├── Dentalink - Condensación de evoluciones.user.js # Resumen de avances en evoluciones
 ├── Dentalink - Autollenado orden de servicio.user.js
+├── Dentalink - Autollenado certificado de incapacidad.user.js
 ├── Dentalink - Antecedentes por defecto.user.js
 ├── Dentalink - Botones receta rapida.user.js
 ├── Dentalink - CUPS rapido orden de servicio.user.js
@@ -120,6 +140,8 @@ Edita estos valores directamente en Tampermonkey para adaptar los textos a tus n
 ├── Dentalink - Registro diario a Google Sheets.user.js
 ├── apps-script/
 │   └── registro-diario.gs
+├── tests/
+│   └── periodontal-progress.test.js
 └── README.md
 ```
 

@@ -1,11 +1,15 @@
 // ==UserScript==
 // @name         Dentalink - Utils (base compartida)
 // @namespace    https://odontofamily.local/dentalink-utils
-// @version      1.1.2
-// @description  Utilidades compartidas para los scripts de Dentalink. No activar manualmente.
+// @version      1.2.1
+// @description  Utilidades compartidas para los scripts de Dentalink.
 // @author       Cris
+// @match        https://*.dentalink.cl/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
+// @grant        none
+// @run-at       document-start
+// @noframes
 // ==/UserScript==
 
 // Este archivo se carga via @require en cada script de Tampermonkey.
@@ -14,9 +18,14 @@
 (function () {
   "use strict";
 
-  if (window.__dlkUtils) return;
+  const existingUtils = window.__dlkUtils;
+  if (existingUtils?.version === "1.2.1"
+    && typeof existingUtils.calculatePeriodontalProgress === "function") return;
 
-  const utils = {};
+  // Amplía una instancia antigua en vez de abandonarla. Esto permite que una
+  // copia cacheada cargada por otro userscript no bloquee las funciones nuevas.
+  const utils = existingUtils || {};
+  utils.version = "1.2.1";
 
   // ─── DOM helpers ───
 
@@ -80,6 +89,341 @@
     return location.pathname.match(/\/pacientes\/(\d+)\b/i)?.[1] || "";
   };
 
+  // ─── Periodontal treatment progress ───
+
+  const PERIODONTAL_PROGRESS_STORAGE_KEY = "dlk_periodontal_progress_v2";
+  const PERIODONTAL_TREATMENTS = [
+    {
+      key: "closed",
+      cups: "240301",
+      label: "Alisado radicular a campo cerrado",
+      shortLabel: "Campo cerrado",
+      scope: "tooth",
+      color: "#ef941f",
+      patterns: [/CAMPO CERRADO/, /ALISAD.*CERRAD/, /RASP.*CERRAD/, /CURETAJ.*CERRAD/]
+    },
+    {
+      key: "open",
+      cups: "242201",
+      label: "Alisado radicular a campo abierto",
+      shortLabel: "Campo abierto",
+      scope: "tooth",
+      color: "#d94141",
+      patterns: [/CAMPO ABIERTO/, /ALISAD.*ABIERT/, /RASP.*ABIERT/, /CURETAJ.*ABIERT/]
+    },
+    {
+      key: "drainage",
+      cups: "240401",
+      label: "Drenaje periodontal",
+      shortLabel: "Drenaje",
+      scope: "tooth",
+      color: "#2563eb",
+      patterns: [/DRENAJ.*PERIODONTAL/, /DRENAJ.*ABSCESO/]
+    },
+    {
+      key: "scaling",
+      cups: "240201",
+      label: "Detartraje subgingival",
+      shortLabel: "Detartraje",
+      scope: "tooth",
+      color: "#0891b2",
+      patterns: [/DETARTRAJ/, /TARTRECTOM/, /REMOCION.*CALCULO/]
+    },
+    {
+      key: "occlusal_adjustment",
+      cups: "248201",
+      label: "Ajuste oclusal",
+      shortLabel: "Ajuste oclusal",
+      scope: "tooth",
+      color: "#7c3aed",
+      patterns: [/AJUSTE OCLUSAL/, /DESGASTE SELECTIVO/]
+    },
+    {
+      key: "crown_lengthening",
+      cups: "242301",
+      label: "Alargamiento de corona clínica",
+      shortLabel: "Alargamiento de corona",
+      scope: "tooth",
+      color: "#db2777",
+      patterns: [/ALARGAMIENTO.*CORONA/, /CORONA CLINICA/]
+    },
+    {
+      key: "frenectomy",
+      cups: "274101",
+      label: "Frenillectomía",
+      shortLabel: "Frenillectomía",
+      scope: "procedure",
+      color: "#4f46e5",
+      patterns: [/FRENILLECTOM/, /FRENECTOM/]
+    }
+  ];
+
+  function treatmentByKey(key) {
+    return PERIODONTAL_TREATMENTS.find((treatment) => treatment.key === key) || null;
+  }
+
+  function emptyTreatmentSets() {
+    return Object.fromEntries(PERIODONTAL_TREATMENTS.map((treatment) => [treatment.key, new Set()]));
+  }
+
+  function sortedTreatmentItems(values) {
+    return [...new Set(values)].sort((a, b) => {
+      const aNumber = Number(a);
+      const bNumber = Number(b);
+      if (Number.isFinite(aNumber) && Number.isFinite(bNumber)) return aNumber - bNumber;
+      return String(a).localeCompare(String(b), "es");
+    });
+  }
+
+  function addTreatmentItems(target, treatment, teeth) {
+    if (!treatment) return;
+    if (treatment.scope === "procedure") {
+      target[treatment.key].add("procedimiento");
+      return;
+    }
+    teeth.forEach((tooth) => target[treatment.key].add(String(tooth)));
+  }
+
+  utils.periodontalTreatments = PERIODONTAL_TREATMENTS.map((treatment) => ({
+    key: treatment.key,
+    cups: treatment.cups,
+    label: treatment.label,
+    shortLabel: treatment.shortLabel,
+    scope: treatment.scope,
+    color: treatment.color
+  }));
+
+  utils.periodontalProgressStorageKey = PERIODONTAL_PROGRESS_STORAGE_KEY;
+
+  utils.periodontalTreatmentByKey = treatmentByKey;
+
+  utils.identifyPeriodontalTreatment = function (value) {
+    const normalized = utils.normalizeKey(value);
+    if (!normalized) return null;
+    return PERIODONTAL_TREATMENTS.find((treatment) =>
+      new RegExp(`(?:^|\\D)${treatment.cups}(?:\\D|$)`).test(normalized) ||
+      treatment.patterns.some((pattern) => pattern.test(normalized))
+    ) || null;
+  };
+
+  utils.extractTeeth = function (value) {
+    return sortedTreatmentItems(
+      [...String(value || "").matchAll(/\b([1-4])\s*\.?\s*([1-8])\b/g)]
+        .map((match) => `${match[1]}${match[2]}`)
+    );
+  };
+
+  utils.parseRequestedPeriodontalTreatments = function (text) {
+    const requested = emptyTreatmentSets();
+    let inAuthorizationBlock = false;
+
+    String(text || "").split("\n").forEach((line) => {
+      const normalizedLine = utils.normalizeKey(line);
+      if (/^SE SOLICITA AUTORIZACION PARA REALIZAR\s*:?$/.test(normalizedLine)) {
+        inAuthorizationBlock = true;
+        return;
+      }
+
+      const actionLine = /^ACCION REALIZADA\s*:/.test(normalizedLine);
+      if (/^(NOTA IMPORTANTE|ATENDIDO POR|FIRMAS)\b/.test(normalizedLine)
+        || /^.+?\s+\(#\d+\)$/.test(line.trim())
+        || actionLine) {
+        inAuthorizationBlock = false;
+      }
+
+      const isInlineRequest = /^[-•]?\s*SE SOLICITA\b/.test(normalizedLine);
+      if (!inAuthorizationBlock && !isInlineRequest) return;
+
+      const treatment = utils.identifyPeriodontalTreatment(line);
+      if (!treatment) return;
+      const requestText = line.replace(/\s+\(\d+\)\.?\s*$/, "");
+      addTreatmentItems(requested, treatment, utils.extractTeeth(requestText));
+    });
+
+    String(text || "").split(/(?=Acci[oó]n realizada:)/i).forEach((segment) => {
+      const lines = segment.split("\n");
+      const actionLine = lines[0] || "";
+      if (!/^Acci[oó]n realizada:/i.test(actionLine.trim())) return;
+
+      const procedureLine = lines.find((line) => /^PROCEDIMIENTO\s*:/i.test(line.trim())) || "";
+      const treatment = utils.identifyPeriodontalTreatment(procedureLine)
+        || utils.identifyPeriodontalTreatment(actionLine);
+      if (!treatment) return;
+
+      const teethLine = lines.find((line) => /^DIENTES?\s*:/i.test(line.trim())) || "";
+      const clinicalTeeth = utils.extractTeeth(teethLine);
+      const piece = actionLine.match(/Pieza\s+([1-4])\s*\.?\s*([1-8])\b/i);
+      const teeth = clinicalTeeth.length
+        ? clinicalTeeth
+        : piece ? [`${piece[1]}${piece[2]}`] : [];
+      addTreatmentItems(requested, treatment, teeth);
+    });
+
+    return Object.fromEntries(
+      PERIODONTAL_TREATMENTS.map((treatment) => [
+        treatment.key,
+        sortedTreatmentItems(requested[treatment.key])
+      ])
+    );
+  };
+
+  utils.parseCompletedPeriodontalTreatments = function (text) {
+    const completed = emptyTreatmentSets();
+    const segments = String(text || "").split(/(?=Acci[oó]n realizada:)/i);
+
+    segments.forEach((segment) => {
+      const lines = segment.split("\n");
+      const actionLine = lines[0] || "";
+      if (!/^Acci[oó]n realizada:/i.test(actionLine.trim())) return;
+
+      const actionTreatment = utils.identifyPeriodontalTreatment(actionLine);
+      const procedureLine = lines.find((line) => /^PROCEDIMIENTO\s*:/i.test(line.trim())) || "";
+      const procedureTreatment = utils.identifyPeriodontalTreatment(procedureLine);
+      const treatment = procedureTreatment || actionTreatment;
+      if (!treatment) return;
+
+      const normalizedSegment = utils.normalizeKey(segment);
+      const hasClinicalEvidence = Boolean(procedureTreatment)
+        || (/(?:HORA INICIO|DIAGNOSTICO|ATENDIDO POR)\b/.test(normalizedSegment)
+          && !/(?:^|\n)\s*-\s*(?:\n|$)/.test(segment));
+      if (!hasClinicalEvidence) return;
+
+      const teethLine = lines.find((line) => /^DIENTES?\s*:/i.test(line.trim())) || "";
+      const clinicalTeeth = utils.extractTeeth(teethLine);
+      const administrativePiece = actionLine.match(/Pieza\s+([1-4])\s*\.?\s*([1-8])\b/i);
+      const teeth = clinicalTeeth.length
+        ? clinicalTeeth
+        : administrativePiece ? [`${administrativePiece[1]}${administrativePiece[2]}`] : [];
+      addTreatmentItems(completed, treatment, teeth);
+    });
+
+    return Object.fromEntries(
+      PERIODONTAL_TREATMENTS.map((treatment) => [
+        treatment.key,
+        sortedTreatmentItems(completed[treatment.key])
+      ])
+    );
+  };
+
+  utils.calculatePeriodontalProgress = function (text) {
+    const requested = utils.parseRequestedPeriodontalTreatments(text);
+    const completedRaw = utils.parseCompletedPeriodontalTreatments(text);
+    const treatments = PERIODONTAL_TREATMENTS.map((treatment) => {
+      const requestedItems = new Set(requested[treatment.key] || []);
+      const completedItems = new Set(completedRaw[treatment.key] || []);
+
+      // Una evolución clínica válida también demuestra que el tratamiento
+      // existió, aunque la solicitud antigua no siga el formato actual.
+      completedItems.forEach((item) => requestedItems.add(item));
+
+      const requestedList = sortedTreatmentItems(requestedItems);
+      const completedList = sortedTreatmentItems(
+        [...completedItems].filter((item) => requestedItems.has(item))
+      );
+      const completedSet = new Set(completedList);
+      const pendingList = requestedList.filter((item) => !completedSet.has(item));
+
+      return {
+        key: treatment.key,
+        cups: treatment.cups,
+        label: treatment.label,
+        shortLabel: treatment.shortLabel,
+        scope: treatment.scope,
+        color: treatment.color,
+        requested: requestedList,
+        completed: completedList,
+        pending: pendingList,
+        total: requestedList.length,
+        completedCount: completedList.length,
+        pendingCount: pendingList.length
+      };
+    }).filter((treatment) => treatment.total > 0);
+
+    const total = treatments.reduce((sum, treatment) => sum + treatment.total, 0);
+    const completedCount = treatments.reduce((sum, treatment) => sum + treatment.completedCount, 0);
+    const pendingCount = total - completedCount;
+
+    return {
+      schemaVersion: 2,
+      treatments,
+      total,
+      completedCount,
+      pendingCount,
+      percent: total ? Math.round((completedCount / total) * 100) : 0,
+      controlled: total > 0 && pendingCount === 0
+    };
+  };
+
+  utils.applyPeriodontalCompletion = function (progress, treatmentKey, teeth) {
+    if (!progress?.total || !treatmentKey) return progress || null;
+    const next = JSON.parse(JSON.stringify(progress));
+    const treatment = next.treatments.find((item) => item.key === treatmentKey);
+    if (!treatment) return next;
+
+    const completionItems = treatment.scope === "procedure"
+      ? ["procedimiento"]
+      : utils.extractTeeth(Array.isArray(teeth) ? teeth.join(", ") : teeth);
+    const completed = new Set(treatment.completed);
+    completionItems.forEach((item) => {
+      if (treatment.requested.includes(item)) completed.add(item);
+    });
+    treatment.completed = sortedTreatmentItems(completed);
+    treatment.completedCount = treatment.completed.length;
+    treatment.pending = treatment.requested.filter((item) => !completed.has(item));
+    treatment.pendingCount = treatment.pending.length;
+
+    next.completedCount = next.treatments.reduce((sum, item) => sum + item.completedCount, 0);
+    next.pendingCount = next.total - next.completedCount;
+    next.percent = next.total ? Math.round((next.completedCount / next.total) * 100) : 0;
+    next.controlled = next.total > 0 && next.pendingCount === 0;
+    return next;
+  };
+
+  utils.formatPeriodontalProgressNote = function (progress) {
+    if (!progress?.total) return "";
+    if (progress.pendingCount === 0) {
+      return [
+        "ESTADO DEL TRATAMIENTO PERIODONTAL",
+        "Paciente controlado por periodoncia. No presenta tratamientos periodontales pendientes según el plan registrado."
+      ].join("\n");
+    }
+
+    const lines = progress.treatments
+      .filter((treatment) => treatment.pendingCount > 0)
+      .map((treatment) => treatment.scope === "procedure"
+        ? `- ${treatment.label}: procedimiento pendiente.`
+        : `- ${treatment.label}: pendiente en ${treatment.pending.length === 1 ? "pieza" : "piezas"} ${treatment.pending.join(", ")}.`);
+
+    return [
+      "TRATAMIENTO PERIODONTAL PENDIENTE",
+      ...lines,
+      "Paciente continúa en tratamiento por periodoncia."
+    ].join("\n");
+  };
+
+  utils.savePeriodontalProgress = function (patientId, progress, metadata = {}) {
+    if (!patientId || !progress?.total) return;
+    try {
+      const records = JSON.parse(localStorage.getItem(PERIODONTAL_PROGRESS_STORAGE_KEY) || "{}");
+      records[patientId] = {
+        progress,
+        updatedAt: new Date().toISOString(),
+        ...metadata
+      };
+      localStorage.setItem(PERIODONTAL_PROGRESS_STORAGE_KEY, JSON.stringify(records));
+    } catch (_) { /* El resumen visual sigue funcionando sin almacenamiento. */ }
+  };
+
+  utils.loadPeriodontalProgress = function (patientId) {
+    if (!patientId) return null;
+    try {
+      const records = JSON.parse(localStorage.getItem(PERIODONTAL_PROGRESS_STORAGE_KEY) || "{}");
+      return records?.[patientId]?.progress || null;
+    } catch (_) {
+      return null;
+    }
+  };
+
   // ─── Centralized URL change watching ───
   // Monkey-patches history.pushState/replaceState only once across all scripts.
   // Each script listens for the custom "dlk:urlchange" event instead.
@@ -88,15 +432,18 @@
     window.dispatchEvent(new CustomEvent("dlk:urlchange"));
   };
 
-  ["pushState", "replaceState"].forEach(function (method) {
-    const original = history[method];
-    history[method] = function () {
-      const result = original.apply(this, arguments);
-      window.setTimeout(notifyUrlChange, 0);
-      return result;
-    };
-  });
-  window.addEventListener("popstate", notifyUrlChange);
+  if (!utils.__urlChangePatched) {
+    ["pushState", "replaceState"].forEach(function (method) {
+      const original = history[method];
+      history[method] = function () {
+        const result = original.apply(this, arguments);
+        window.setTimeout(notifyUrlChange, 0);
+        return result;
+      };
+    });
+    window.addEventListener("popstate", notifyUrlChange);
+    utils.__urlChangePatched = true;
+  }
 
   /**
    * Register a callback for URL changes (SPA navigation).

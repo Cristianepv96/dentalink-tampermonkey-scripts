@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Condensación de evoluciones
 // @namespace    san-jose-ips-odontologica
-// @version      0.6.1
+// @version      1.0.1
 // @description  Resume localmente el avance periodontal en la ficha de evoluciones.
 // @author       Cris
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js
 // @match        https://*.dentalink.cl/*
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.1
 // @grant        none
 // @run-at       document-start
 // @noframes
@@ -15,13 +16,22 @@
 (function () {
   'use strict';
 
+  const {
+    normalizeKey,
+    getPatientIdFromUrl,
+    identifyPeriodontalTreatment,
+    periodontalTreatmentByKey,
+    extractTeeth,
+    calculatePeriodontalProgress,
+    savePeriodontalProgress,
+  } = window.__dlkUtils;
   const CARD_ID = 'sj-periodontal-summary';
   const STYLE_ID = 'sj-periodontal-summary-styles';
   const GROUP_SUMMARY_CLASS = 'sj-periodontal-group-summary';
   const COLLAPSED_ENTRY_CLASS = 'sj-periodontal-collapsed-entry';
   const COMPLETED_ENTRY_CLASS = 'sj-periodontal-completed-entry';
   const COMPLETED_BADGE_CLASS = 'sj-periodontal-completed-badge';
-  const SCRIPT_VERSION = '0.6.1';
+  const SCRIPT_VERSION = '1.0.1';
   const PROFESSIONAL_NAME = 'CRISTIAN EDUARDO PEÑA VILLAMIZAR';
   const PAGE_PATTERN = /\/pacientes\/\d+\/ficha\/evoluciones/;
   const RENDER_DEBOUNCE_MS = 180;
@@ -39,8 +49,7 @@
   let pendingSourceSince = 0;
 
   function teethFrom(text) {
-    return [...text.matchAll(/\b([1-4])\s*\.?\s*([1-8])\b/g)]
-      .map((match) => Number(`${match[1]}${match[2]}`));
+    return extractTeeth(text).map(Number);
   }
 
   function sortedUnique(values) {
@@ -48,25 +57,15 @@
   }
 
   function normalizeName(value) {
-    return value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toUpperCase();
+    return normalizeKey(value);
   }
 
   function treatmentCategory(value) {
-    const normalized = normalizeName(value);
-    const isPeriodontalAction = /ALISAD|CURETAJ|RASP/.test(normalized);
-    if (!isPeriodontalAction) return null;
-    if (/ABIERTO/.test(normalized)) return 'open';
-    if (/CERRADO/.test(normalized)) return 'closed';
-    return null;
+    return identifyPeriodontalTreatment(value)?.key || null;
   }
 
   function categoryLabel(category) {
-    return category === 'open' ? 'Campo abierto' : 'Campo cerrado';
+    return periodontalTreatmentByKey(category)?.shortLabel || category;
   }
 
   function onlyProfessionalEntries(text) {
@@ -89,101 +88,9 @@
     return `${values.slice(0, -1).join(', ')} y ${values.at(-1)}`;
   }
 
-  function findRequestedTreatments(text) {
-    const requested = { open: [], closed: [] };
-    let inAuthorizationBlock = false;
-
-    for (const line of text.split('\n')) {
-      const normalizedLine = normalizeName(line);
-      if (/^SE SOLICITA AUTORIZACION PARA REALIZAR\s*:?$/.test(normalizedLine)) {
-        inAuthorizationBlock = true;
-        continue;
-      }
-
-      if (/^(NOTA IMPORTANTE|ATENDIDO POR|FIRMAS)\b/.test(normalizedLine)
-        || /^.+?\s+\(#\d+\)$/.test(line.trim())
-        || /^ACCION REALIZADA\s*:/.test(normalizedLine)) {
-        inAuthorizationBlock = false;
-      }
-
-      const isInlineRequest = /^[-•]?\s*SE SOLICITA\b/.test(normalizedLine);
-      if (!inAuthorizationBlock && !isInlineRequest) continue;
-
-      const category = treatmentCategory(line);
-      if (!category) continue;
-
-      const categoryTail = line.match(/\b(?:ABIERTO|CERRADO)\b([\s\S]*)/i)?.[1] || '';
-      const treatmentOnly = categoryTail.split(/\s+-\s+/)[0];
-      requested[category].push(...teethFrom(treatmentOnly));
-    }
-
-    requested.open = sortedUnique(requested.open);
-    requested.closed = sortedUnique(requested.closed);
-    return requested;
-  }
-
-  function findCompletedTreatments(text) {
-    const completed = { open: [], closed: [] };
-    const segments = text.split(/(?=Acci[oó]n realizada:)/i);
-
-    for (const segment of segments) {
-      const actionLine = segment.split('\n')[0] || '';
-      let category;
-
-      category = treatmentCategory(actionLine);
-      if (!category) continue;
-
-      const piece = actionLine.match(/Pieza\s+([1-4])\s*\.?\s*([1-8])\b/i);
-      if (piece) completed[category].push(Number(`${piece[1]}${piece[2]}`));
-
-      const expandedTeeth = segment.match(/Dientes:\s*([^\n.]+)/i);
-      if (expandedTeeth) {
-        const procedureLine = segment.match(/PROCEDIMIENTO:\s*[^\n]+/i)?.[0] || '';
-        const expandedCategory = treatmentCategory(procedureLine) || category;
-        completed[expandedCategory].push(...teethFrom(expandedTeeth[1]));
-      }
-    }
-
-    completed.open = sortedUnique(completed.open);
-    completed.closed = sortedUnique(completed.closed);
-    return completed;
-  }
-
-  function intersection(values, allowed) {
-    const allowedSet = new Set(allowed);
-    return values.filter((value) => allowedSet.has(value));
-  }
-
-  function difference(values, excluded) {
-    const excludedSet = new Set(excluded);
-    return values.filter((value) => !excludedSet.has(value));
-  }
-
   function calculateSummary(text) {
-    const requested = findRequestedTreatments(text);
-    const completedRaw = findCompletedTreatments(text);
-    const requestedAll = sortedUnique([...requested.open, ...requested.closed]);
-
-    if (!requestedAll.length) return null;
-
-    const completedOpen = intersection(completedRaw.open, requested.open);
-    const completedClosed = intersection(completedRaw.closed, requested.closed);
-    const completedAll = sortedUnique([...completedOpen, ...completedClosed]);
-    const pendingOpen = difference(requested.open, completedOpen);
-    const pendingClosed = difference(requested.closed, completedClosed);
-    const pendingCount = pendingOpen.length + pendingClosed.length;
-    const percent = Math.round((completedAll.length / requestedAll.length) * 100);
-
-    return {
-      percent,
-      pendingCount,
-      pendingOpen,
-      pendingClosed,
-      completedOpen,
-      completedClosed,
-      completedAll,
-      total: requestedAll.length,
-    };
+    const summary = calculatePeriodontalProgress(text);
+    return summary.total ? summary : null;
   }
 
   function addStyles() {
@@ -232,6 +139,7 @@
         font-size: 14px;
         font-weight: 600;
       }
+      #${CARD_ID} .sj-periodontal-pending--controlled { color: #207a46; }
       #${CARD_ID} .sj-periodontal-row {
         display: flex;
         align-items: flex-start;
@@ -247,9 +155,6 @@
         margin-top: 5px;
         border-radius: 50%;
       }
-      #${CARD_ID} .sj-periodontal-dot--open { background: #d94141; }
-      #${CARD_ID} .sj-periodontal-dot--closed { background: #ef941f; }
-      #${CARD_ID} .sj-periodontal-dot--done { background: #249653; }
       .${GROUP_SUMMARY_CLASS} {
         box-sizing: border-box;
         display: flex;
@@ -327,18 +232,24 @@
     document.head.appendChild(style);
   }
 
-  function makeRow(dotClass, label, values) {
+  function makeTreatmentRow(treatment) {
     const row = document.createElement('div');
     row.className = 'sj-periodontal-row';
 
     const dot = document.createElement('span');
-    dot.className = `sj-periodontal-dot ${dotClass}`;
+    dot.className = 'sj-periodontal-dot';
+    dot.style.backgroundColor = treatment.color;
     dot.setAttribute('aria-hidden', 'true');
 
     const text = document.createElement('span');
     const strong = document.createElement('strong');
-    strong.textContent = `${label}: `;
-    text.append(strong, document.createTextNode(formatTeeth(values)));
+    strong.textContent = `${treatment.label}: `;
+    const status = treatment.pendingCount === 0
+      ? `${treatment.completedCount}/${treatment.total} · Completado`
+      : treatment.scope === 'procedure'
+        ? `${treatment.completedCount}/${treatment.total} · Procedimiento pendiente`
+        : `${treatment.completedCount}/${treatment.total} · Pendiente en ${formatTeeth(treatment.pending)}`;
+    text.append(strong, document.createTextNode(status));
 
     row.append(dot, text);
     return row;
@@ -352,7 +263,7 @@
 
     const title = document.createElement('h3');
     title.className = 'sj-periodontal-title';
-    title.textContent = `Tratamiento periodontal — ${summary.percent} % completado`;
+    title.textContent = `Tratamiento periodontal — ${summary.completedCount} de ${summary.total} completados (${summary.percent} %)`;
 
     const progress = document.createElement('div');
     progress.className = 'sj-periodontal-progress';
@@ -366,16 +277,16 @@
 
     const pending = document.createElement('p');
     pending.className = 'sj-periodontal-pending';
-    pending.textContent = `${summary.pendingCount} ${summary.pendingCount === 1 ? 'procedimiento pendiente' : 'procedimientos pendientes'}`;
+    pending.classList.toggle('sj-periodontal-pending--controlled', summary.pendingCount === 0);
+    pending.textContent = summary.pendingCount === 0
+      ? '✓ Paciente controlado por periodoncia'
+      : `${summary.pendingCount} ${summary.pendingCount === 1 ? 'procedimiento pendiente' : 'procedimientos pendientes'}`;
 
-    card.append(
-      title,
-      progress,
-      pending,
-      makeRow('sj-periodontal-dot--open', 'Campo abierto', summary.pendingOpen),
-      makeRow('sj-periodontal-dot--closed', 'Campo cerrado', summary.pendingClosed),
-      makeRow('sj-periodontal-dot--done', 'Realizado', summary.completedAll),
-    );
+    card.append(title, progress, pending);
+    summary.treatments
+      .slice()
+      .sort((a, b) => b.pendingCount - a.pendingCount)
+      .forEach((treatment) => card.appendChild(makeTreatmentRow(treatment)));
 
     return card;
   }
@@ -393,12 +304,18 @@
     const actions = [...text.matchAll(/Acci[oó]n realizada:\s*([^\n]+)/gi)];
     if (!plan || actions.length !== 1) return null;
     const piece = actions[0][1].match(/Pieza\s+([1-4])\s*\.?\s*([1-8])\b/i);
-    const categoryKey = treatmentCategory(actions[0][1]);
-    if (!piece || !categoryKey) return null;
-    const administrativePiece = Number(`${piece[1]}${piece[2]}`);
-    const clinicalTeethLine = text.match(/Dientes:\s*([^\n.]+)/i);
+    const actionCategoryKey = treatmentCategory(actions[0][1]);
+    const procedureLine = text.match(/PROCEDIMIENTO:\s*[^\n]+/i)?.[0] || '';
+    const categoryKey = treatmentCategory(procedureLine) || actionCategoryKey;
+    const treatment = periodontalTreatmentByKey(categoryKey);
+    if (!treatment) return null;
+    const administrativePiece = piece ? Number(`${piece[1]}${piece[2]}`) : null;
+    const clinicalTeethLine = text.match(/Dientes?:\s*([^\n.]+)/i);
     const clinicalTeeth = clinicalTeethLine ? sortedUnique(teethFrom(clinicalTeethLine[1])) : [];
-    const reportedTeeth = clinicalTeeth.length ? clinicalTeeth : [administrativePiece];
+    const reportedTeeth = clinicalTeeth.length
+      ? clinicalTeeth
+      : administrativePiece ? [administrativePiece] : [];
+    if (treatment.scope === 'tooth' && !reportedTeeth.length) return null;
 
     return {
       category: categoryLabel(categoryKey),
@@ -408,6 +325,7 @@
       piece: administrativePiece,
       plan: plan[1],
       reportedTeeth,
+      scope: treatment.scope,
     };
   }
 
@@ -420,7 +338,7 @@
     title.textContent = `Plan #${group.plan} · ${group.category}`;
     label.append(
       title,
-      document.createTextNode(` · Piezas ${formatTeeth(group.pieces)} · ${group.hidden.length} ${group.hidden.length === 1 ? 'registro repetido oculto' : 'registros repetidos ocultos'}`),
+      document.createTextNode(`${group.pieces.length ? ` · Piezas ${formatTeeth(group.pieces)}` : ''} · ${group.hidden.length} ${group.hidden.length === 1 ? 'registro repetido oculto' : 'registros repetidos ocultos'}`),
     );
 
     const button = document.createElement('button');
@@ -447,7 +365,7 @@
     for (const container of containers) {
       if (container.dataset.sjPeriodontalCompacted === 'true') continue;
       const children = [...container.children];
-      if (children.length < 2 || children.length > 20) continue;
+      if (children.length < 2) continue;
 
       const entries = children.map(parsePeriodontalEntry).filter(Boolean);
       if (entries.length < 2) continue;
@@ -468,7 +386,7 @@
         const group = {
           category: subgroup[0].category,
           hidden,
-          pieces: sortedUnique(subgroup.map((entry) => entry.piece)),
+          pieces: sortedUnique(subgroup.map((entry) => entry.piece).filter(Boolean)),
           plan: subgroup[0].plan,
         };
 
@@ -501,8 +419,12 @@
   }
 
   function highlightCompletedEntries(main, summary) {
-    const completedOpen = new Set(summary.completedOpen);
-    const completedClosed = new Set(summary.completedClosed);
+    const completedByTreatment = new Map(
+      summary.treatments.map((treatment) => [
+        treatment.key,
+        new Set(treatment.completed.map(String)),
+      ])
+    );
     const currentEntries = individualPeriodontalEntries(main);
     const currentElements = new Set(currentEntries.map((entry) => entry.element));
 
@@ -513,9 +435,12 @@
     }
 
     for (const entry of currentEntries) {
-      const completedSet = entry.categoryKey === 'open' ? completedOpen : completedClosed;
-      const realizedTeeth = entry.reportedTeeth.filter((piece) => completedSet.has(piece));
-      const completed = realizedTeeth.length > 0;
+      const completedSet = completedByTreatment.get(entry.categoryKey) || new Set();
+      const realizedTeeth = entry.reportedTeeth
+        .filter((piece) => completedSet.has(String(piece)));
+      const completed = entry.scope === 'procedure'
+        ? completedSet.has('procedimiento')
+        : realizedTeeth.length > 0;
 
       if (!completed) {
         entry.element.classList.remove(COMPLETED_ENTRY_CLASS);
@@ -527,8 +452,10 @@
       if (entry.element.querySelector(`.${COMPLETED_BADGE_CLASS}`)) continue;
       const badge = document.createElement('div');
       badge.className = COMPLETED_BADGE_CLASS;
-      const toothLabel = realizedTeeth.length === 1 ? 'Pieza' : 'Piezas';
-      badge.textContent = `✓ Realizado · ${toothLabel} ${formatTeeth(realizedTeeth)} · ${entry.category}`;
+      const toothText = entry.scope === 'procedure'
+        ? ''
+        : ` · ${realizedTeeth.length === 1 ? 'Pieza' : 'Piezas'} ${formatTeeth(realizedTeeth)}`;
+      badge.textContent = `✓ Realizado${toothText} · ${entry.category}`;
       entry.element.prepend(badge);
     }
   }
@@ -654,6 +581,10 @@
       lastSignature = '';
       return;
     }
+    savePeriodontalProgress(getPatientIdFromUrl(), summary, {
+      sourcePath: location.pathname,
+      scriptVersion: SCRIPT_VERSION,
+    });
     highlightCompletedEntries(main, summary);
 
     const signature = JSON.stringify(summary);
