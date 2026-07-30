@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Autollenado orden de servicio
 // @namespace    https://odontofamily.local/dentalink-orden-servicio
-// @version      1.4.1
+// @version      1.5.0
 // @description  Rellena automaticamente campos base de la orden de servicio en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.2
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -26,7 +26,10 @@
     { label: /^CODIGO:?$/, control: "input", value: "K053" },
     { label: /^TIPO DE DIAGNOSTICO:?$/, control: "select", value: "Confirmado" }
   ];
+  const ORDER_DRAFT_STORAGE_KEY = "dlk_periodontal_order_drafts_v1";
+  const ORDER_DRAFT_MAX_AGE_MS = 2 * 60 * 60 * 1000;
   const TARGET_PATH = /\/pacientes\/\d+\/ficha\/formularios\/nuevo\/35\b/i;
+  let appliedDraftToken = "";
 
   function today() {
     const date = new Date();
@@ -59,8 +62,11 @@
   }
 
   function setTextControl(control, value) {
-    if (!value || control.value === value) return false;
-    setNativeValue(control, value);
+    const nextValue = control instanceof HTMLInputElement
+      ? String(value || "").replace(/\s*[\r\n]+\s*/g, " ")
+      : value;
+    if (!nextValue || control.value === nextValue) return false;
+    setNativeValue(control, nextValue);
     dispatchControlEvents(control);
     return true;
   }
@@ -88,9 +94,62 @@
     return setTextControl(control, value);
   }
 
+  function orderDraftToken() {
+    return new URLSearchParams(location.search).get("dlk-order") || "";
+  }
+
+  function getOrderDraft() {
+    const token = orderDraftToken();
+    if (!token) return null;
+
+    try {
+      const records = JSON.parse(localStorage.getItem(ORDER_DRAFT_STORAGE_KEY) || "{}");
+      const draft = records[token];
+      const createdAt = new Date(draft?.createdAt).getTime();
+      const patientId = getPatientIdFromUrl();
+      if (!draft || draft.patientId !== patientId || !createdAt
+        || Date.now() - createdAt > ORDER_DRAFT_MAX_AGE_MS) {
+        if (draft) {
+          delete records[token];
+          localStorage.setItem(ORDER_DRAFT_STORAGE_KEY, JSON.stringify(records));
+        }
+        return null;
+      }
+      return { token, draft };
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function fillOrderDraft() {
+    const record = getOrderDraft();
+    if (!record || appliedDraftToken === record.token) return;
+
+    const fields = [
+      { label: /^CODIGO CUPS:?$/, value: record.draft.cups },
+      { label: /^CANTIDAD:?$/, value: String(record.draft.quantity || "") },
+      { label: /^INDICACIONES\/?ESPECIFICACIONES:?$/, value: record.draft.indications },
+      { label: /^JUSTIFICACION CLINICA:?$/, value: record.draft.justification }
+    ];
+    let allControlsReady = true;
+
+    fields.forEach((config) => {
+      const field = findField(config.label);
+      const control = field?.querySelector("input, textarea");
+      if (!control) {
+        allControlsReady = false;
+        return;
+      }
+      setTextControl(control, config.value);
+    });
+
+    if (allControlsReady) appliedDraftToken = record.token;
+  }
+
   function autofill() {
     if (!isTargetPage()) return;
     DEFAULTS.forEach(fillField);
+    fillOrderDraft();
   }
 
   function scheduleAutofill() {

@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.0.2
+// @version      3.0.3
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.1
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.2
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -62,6 +62,8 @@
     || (() => "");
   const loadPeriodontalProgress = sharedUtils.loadPeriodontalProgress
     || (() => null);
+  const buildSharedValuationText = sharedUtils.buildPeriodontalValuationText
+    || null;
 
   // ═══════════════════════════════════════════════════════════════════════
   // CONFIGURACIÓN CLÍNICA (editar aquí los textos frecuentes)
@@ -77,7 +79,8 @@
       naproxeno: "Naproxeno 500mg tabletas #9 Tomar 1 tab cada 8 horas por 3 días. En caso de dolor no tolerable o indicación en posología."
     },
     sutura: "Seda 3.0 punto simple",
-    notaControles: "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal."
+    notaControles: sharedUtils.defaultPeriodontalControlNote
+      || "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal."
   };
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -708,6 +711,13 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   function buildValoracionText(values = {}) {
     const periodontalSummary = getSavedPeriodontalSummary();
     const additionalRequests = buildAdditionalValuationRequests(values);
+    if (buildSharedValuationText) {
+      return buildSharedValuationText({
+        summary: periodontalSummary,
+        additionalRequests,
+        controlNote: CONFIG.notaControles
+      });
+    }
     if (periodontalSummary) {
       return `Paciente acude a cita de valoración especializada por periodoncia, se observan deficiencias en higiene oral, sangrado al sondaje e inflamación generalizada, requiriendo manejo con periodoncia para evitar exacerbación de la enfermedad periodontal. Al sondaje se observan bolsas periodontales en dientes:
 
@@ -1075,7 +1085,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
         ]
       }
     ], (values) => insertText(buildValoracionText(values)),
-    "Campo cerrado, campo abierto, drenaje y ajuste oclusal se incluyen automáticamente desde el periodontograma.");
+    "Campo cerrado, campo abierto y drenaje se incluyen automáticamente desde el periodontograma.");
   }
 
   function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration, allowNoAnesthesia = false, category = "") {
