@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Utils (base compartida)
 // @namespace    https://odontofamily.local/dentalink-utils
-// @version      1.2.1
+// @version      1.2.2
 // @description  Utilidades compartidas para los scripts de Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/*
@@ -19,13 +19,13 @@
   "use strict";
 
   const existingUtils = window.__dlkUtils;
-  if (existingUtils?.version === "1.2.1"
+  if (existingUtils?.version === "1.2.2"
     && typeof existingUtils.calculatePeriodontalProgress === "function") return;
 
   // Amplía una instancia antigua en vez de abandonarla. Esto permite que una
   // copia cacheada cargada por otro userscript no bloquee las funciones nuevas.
   const utils = existingUtils || {};
-  utils.version = "1.2.1";
+  utils.version = "1.2.2";
 
   // ─── DOM helpers ───
 
@@ -92,6 +92,7 @@
   // ─── Periodontal treatment progress ───
 
   const PERIODONTAL_PROGRESS_STORAGE_KEY = "dlk_periodontal_progress_v2";
+  const DEFAULT_PERIODONTAL_CONTROL_NOTE = "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.";
   const PERIODONTAL_TREATMENTS = [
     {
       key: "closed",
@@ -265,6 +266,72 @@
         sortedTreatmentItems(requested[treatment.key])
       ])
     );
+  };
+
+  utils.defaultPeriodontalControlNote = DEFAULT_PERIODONTAL_CONTROL_NOTE;
+
+  utils.buildPeriodontalValuationText = function ({
+    summary = "",
+    additionalRequests = [],
+    controlNote = DEFAULT_PERIODONTAL_CONTROL_NOTE
+  } = {}) {
+    const requestLines = additionalRequests.filter(Boolean);
+    let summaryWithRequests = String(summary || "");
+
+    if (requestLines.length) {
+      summaryWithRequests = /Se solicita autorizaci[oó]n para realizar\s*:/i.test(summaryWithRequests)
+        ? `${summaryWithRequests}\n${requestLines.join("\n")}`
+        : [
+          summaryWithRequests,
+          "",
+          "Se solicita autorización para realizar:",
+          requestLines.join("\n")
+        ].join("\n");
+    }
+
+    const introduction = "Paciente acude a cita de valoración especializada por periodoncia, se observan deficiencias en higiene oral, sangrado al sondaje e inflamación generalizada, requiriendo manejo con periodoncia para evitar exacerbación de la enfermedad periodontal. Al sondaje se observan bolsas periodontales en dientes:";
+    if (summaryWithRequests) {
+      return `${introduction}
+
+${summaryWithRequests}
+
+${controlNote}
+
+Cita 20 min`;
+    }
+
+    return `${introduction}
+
+Se sugiere realizar${" "}
+
+Se solicita autorización para realizar:
+${requestLines.length ? `\n${requestLines.join("\n")}` : ""}
+
+${controlNote}
+
+Cita 20 min`;
+  };
+
+  utils.buildPeriodontalOrderItems = function (summary) {
+    const requested = utils.parseRequestedPeriodontalTreatments(summary);
+    const configs = [
+      { key: "closed", indications: "Alisado radicular a campo cerrado" },
+      { key: "open", indications: "Alisado radicular a campo abierto" },
+      { key: "drainage", indications: "Drenaje periodontal" }
+    ];
+
+    return configs.flatMap((config) => {
+      const teeth = sortedTreatmentItems(requested[config.key] || []);
+      const treatment = treatmentByKey(config.key);
+      if (!treatment || !teeth.length) return [];
+      return [{
+        key: config.key,
+        cups: treatment.cups,
+        teeth,
+        quantity: teeth.length,
+        indications: `${config.indications} en ${teeth.join(", ")}.`
+      }];
+    });
   };
 
   utils.parseCompletedPeriodontalTreatments = function (text) {

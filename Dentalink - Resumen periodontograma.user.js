@@ -1,27 +1,60 @@
 // ==UserScript==
 // @name         Dentalink - Resumen periodontograma
 // @namespace    https://odontofamily.local/dentalink-periodontograma-resumen
-// @version      1.8.1
+// @version      1.9.6
 // @description  Genera resumen de bolsas periodontales, sangrado, movilidad y furca desde el periodontograma.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma.user.js
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.1
-// @grant        none
+// @grant        GM_openInTab
 // @run-at       document-idle
 // ==/UserScript==
 
 (function () {
   "use strict";
 
-  const { getPatientIdFromUrl, watchPage, registerPanel, unregisterPanel } = window.__dlkUtils;
+  const getPatientIdFromUrl = () =>
+    location.pathname.match(/\/pacientes\/(\d+)\b/i)?.[1] || "";
+  const watchPage = (callback, options = {}) => {
+    const delay = options.delay ?? 150;
+    const intervalMs = options.interval ?? 1500;
+    let timer = null;
+    const run = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(callback, delay);
+    };
+    run();
+    const target = document.body || document.documentElement;
+    if (target) {
+      new MutationObserver(run).observe(target, { childList: true, subtree: true });
+    }
+    if (intervalMs > 0) {
+      window.setInterval(() => {
+        if (!options.isStale || options.isStale()) run();
+      }, intervalMs);
+    }
+    return run;
+  };
+  const registerPanel = (panel, options = {}) => {
+    if (!panel) return;
+    const saved = getPanelPosition();
+    panel.style.position = "fixed";
+    panel.style.left = `${saved?.left ?? options.margin ?? 8}px`;
+    panel.style.right = "auto";
+    panel.style.top = `${saved?.top ?? options.top ?? 154}px`;
+    panel.style.zIndex = String(options.zIndex || 999990);
+    enableDrag(panel);
+  };
+  const unregisterPanel = () => {};
 
   const PANEL_ID = "dlk-perio-resumen";
   const STYLE_ID = "dlk-perio-resumen-style";
   const STORAGE_KEY = "dlk_periodontograma_resumen_v1";
+  const ORDER_DRAFT_STORAGE_KEY = "dlk_periodontal_order_drafts_v1";
   const POSITION_KEY = "dlk_periodontograma_resumen_position_v1";
   const TARGET_PATH = /\/pacientes\/\d+\/ficha\/periodontograma\b/i;
+  const ORDER_DRAFT_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
   function isTargetPage() {
     return TARGET_PATH.test(location.pathname);
@@ -116,7 +149,6 @@
     const records = collectPeriodontalData();
     const pockets = records.filter((record) => record.maxSurco >= 4);
     const exudate = records.filter((record) => record.exudado > 0);
-    const mobility = records.filter((record) => record.movilidad > 0);
     const closedField = pockets.filter((record) => record.maxSurco >= 4 && record.maxSurco <= 5);
     const openField = pockets.filter((record) => record.maxSurco >= 6);
     const findings = records.filter((record) =>
@@ -195,10 +227,6 @@
       requestLines.push(`- [240401] Drenaje periodontal en ${record.tooth} con el fin de eliminar exudado periodontal, evitar la pérdida ósea activa que se está produciendo en ese momento y mejorar el pronóstico periodontal.`);
     });
 
-    if (mobility.length) {
-      requestLines.push(`- [248201] Ajuste oclusal en ${formatToothList(mobility)} para eliminar contactos prematuros que impiden reducir el riesgo de aumento de la movilidad por trauma oclusal secundario.`);
-    }
-
     const result = [
       "Hallazgos periodontales:",
       findingsText
@@ -213,6 +241,148 @@
     }
 
     return result.join("\n");
+  }
+
+  function buildFallbackValuationText(summary) {
+    const introduction = "Paciente acude a cita de valoración especializada por periodoncia, se observan deficiencias en higiene oral, sangrado al sondaje e inflamación generalizada, requiriendo manejo con periodoncia para evitar exacerbación de la enfermedad periodontal. Al sondaje se observan bolsas periodontales en dientes:";
+    const controlNote = "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses para evitar reincidencia y exacerbación de la enfermedad periodontal.";
+    return `${introduction}
+
+${summary}
+
+${controlNote}
+
+Cita 20 min`;
+  }
+
+  function buildOrderItemsFromPeriodontogram() {
+    const records = collectPeriodontalData();
+    const configurations = [
+      {
+        key: "closed",
+        cups: "240301",
+        label: "Alisado radicular a campo cerrado",
+        matches: (record) => record.maxSurco >= 4 && record.maxSurco <= 5
+      },
+      {
+        key: "open",
+        cups: "242201",
+        label: "Alisado radicular a campo abierto",
+        matches: (record) => record.maxSurco >= 6
+      },
+      {
+        key: "drainage",
+        cups: "240401",
+        label: "Drenaje periodontal",
+        matches: (record) => record.exudado > 0
+      }
+    ];
+
+    return configurations.flatMap((configuration) => {
+      const teeth = records
+        .filter(configuration.matches)
+        .map((record) => record.tooth);
+      if (!teeth.length) return [];
+      return [{
+        key: configuration.key,
+        cups: configuration.cups,
+        teeth,
+        quantity: teeth.length,
+        indications: `${configuration.label} en ${teeth.join(", ")}.`
+      }];
+    });
+  }
+
+  function createDraftToken() {
+    return window.crypto?.randomUUID?.()
+      || `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function readOrderDrafts() {
+    try {
+      return JSON.parse(localStorage.getItem(ORDER_DRAFT_STORAGE_KEY) || "{}");
+    } catch (_error) {
+      return {};
+    }
+  }
+
+  function purgeExpiredOrderDrafts(records = readOrderDrafts()) {
+    const now = Date.now();
+    Object.keys(records).forEach((token) => {
+      const createdAt = new Date(records[token]?.createdAt).getTime();
+      if (!createdAt || now - createdAt > ORDER_DRAFT_MAX_AGE_MS) delete records[token];
+    });
+    return records;
+  }
+
+  function prepareOrderDrafts(summary) {
+    const patientId = getPatientIdFromUrl();
+    if (!patientId) return [];
+
+    const justification = buildFallbackValuationText(summary);
+    const items = buildOrderItemsFromPeriodontogram();
+
+    return items.map((item) => ({
+      token: createDraftToken(),
+      patientId,
+      cups: item.cups,
+      quantity: item.quantity,
+      teeth: item.teeth,
+      indications: item.indications,
+      justification,
+      createdAt: new Date().toISOString(),
+      sourceUrl: location.href
+    }));
+  }
+
+  function saveAndOpenOrderDrafts(drafts) {
+    if (!drafts.length) return 0;
+
+    const records = purgeExpiredOrderDrafts();
+    drafts.forEach((draft) => {
+      records[draft.token] = draft;
+    });
+    localStorage.setItem(ORDER_DRAFT_STORAGE_KEY, JSON.stringify(records));
+
+    const openDraft = (draft) => {
+      const url = `${location.origin}/pacientes/${draft.patientId}/ficha/formularios/nuevo/35?dlk-order=${encodeURIComponent(draft.token)}`;
+      try {
+        if (typeof GM_openInTab === "function") {
+          GM_openInTab(url, { active: false, insert: true });
+        } else {
+          window.open(url, "_blank");
+        }
+      } catch (_error) {
+        window.open(url, "_blank");
+      }
+    };
+
+    drafts.forEach((draft, index) => {
+      // Dentalink puede dejar una de las páginas vacía si recibe dos formularios
+      // nuevos al mismo tiempo. Espaciar la navegación evita esa carrera.
+      if (index === 0) {
+        openDraft(draft);
+      } else {
+        window.setTimeout(() => openDraft(draft), index * 1800);
+      }
+    });
+    return drafts.length;
+  }
+
+  function showGeneratedOrders(button, total, opened) {
+    const originalText = "Generar";
+    if (!total) {
+      button.textContent = "Sin órdenes";
+    } else if (opened === total) {
+      button.textContent = `${total} ${total === 1 ? "orden" : "órdenes"} ✓`;
+      button.classList.add("copied");
+    } else {
+      button.textContent = `${opened}/${total} pestañas`;
+    }
+    window.setTimeout(() => {
+      button.textContent = originalText;
+      button.classList.remove("copied");
+    }, 2200);
   }
 
   function saveSummary(text) {
@@ -407,8 +577,13 @@
       if (!textarea) return;
 
       if (action === "generate") {
+        const button = event.target.closest("button");
+        const cleanSummary = buildSummary(false);
         textarea.value = buildSummary(true);
-        saveSummary(buildSummary(false));
+        saveSummary(cleanSummary);
+        const drafts = prepareOrderDrafts(cleanSummary);
+        const opened = saveAndOpenOrderDrafts(drafts);
+        showGeneratedOrders(button, drafts.length, opened);
       }
       if (action === "copy") {
         const button = event.target.closest("button");
@@ -494,7 +669,7 @@
       let changed = false;
 
       for (const patientId of Object.keys(records)) {
-        const savedAt = Date.parse(records[patientId]?.savedAt);
+        const savedAt = new Date(records[patientId]?.savedAt).getTime();
         if (!savedAt || now - savedAt > MAX_AGE_MS) {
           delete records[patientId];
           changed = true;

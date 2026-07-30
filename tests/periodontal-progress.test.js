@@ -101,7 +101,7 @@ test("la utilidad nueva amplía una instancia antigua ya cargada", () => {
   const legacyUtils = { legacyMarker: true };
   const utils = loadUtils(legacyUtils);
   assert.equal(utils, legacyUtils);
-  assert.equal(utils.version, "1.2.1");
+  assert.equal(utils.version, "1.2.2");
   assert.equal(typeof utils.calculatePeriodontalProgress, "function");
   assert.equal(utils.legacyMarker, true);
 });
@@ -177,6 +177,99 @@ test("simula el procedimiento actual y genera el estado de paciente controlado",
   assert.equal(completed.pendingCount, 0);
   assert.equal(completed.controlled, true);
   assert.match(note, /Paciente controlado por periodoncia/);
+});
+
+test("construye la misma valoración compartida a partir del resumen", () => {
+  const utils = loadUtils();
+  const summary = [
+    "Hallazgos periodontales:",
+    "Se observa diente 16 con bolsas de 6mm.",
+    "",
+    "Se solicita autorización para realizar:",
+    "- [242201] Raspaje y alisado radicular a campo abierto en 16."
+  ].join("\n");
+
+  const valuation = utils.buildPeriodontalValuationText({ summary });
+
+  assert.match(valuation, /^Paciente acude a cita de valoración especializada por periodoncia/);
+  assert.match(valuation, /Hallazgos periodontales:\nSe observa diente 16/);
+  assert.match(valuation, /\[242201\].*campo abierto en 16/);
+  assert.match(valuation, /NOTA IMPORTANTE:/);
+  assert.match(valuation, /Cita 20 min$/);
+});
+
+test("prepara órdenes solo para campo cerrado, campo abierto y drenaje", () => {
+  const utils = loadUtils();
+  const summary = [
+    "Se solicita autorización para realizar:",
+    "- [240301] Raspaje y alisado radicular a campo cerrado en 33, 45.",
+    "- [242201] Raspaje y alisado radicular a campo abierto en 16, 17, 21.",
+    "- [240401] Drenaje periodontal en 26.",
+    "- [248201] Ajuste oclusal en 22.",
+    "- [240201] Detartraje subgingival en 31.",
+    "- [242301] Alargamiento de corona clínica en 11.",
+    "- [274101] Frenillectomía labial superior."
+  ].join("\n");
+
+  const orders = utils.buildPeriodontalOrderItems(summary);
+
+  assert.deepEqual(
+    Array.from(orders, (order) => order.cups),
+    ["240301", "242201", "240401"]
+  );
+  assert.deepEqual([...orders[0].teeth], ["33", "45"]);
+  assert.equal(orders[0].quantity, 2);
+  assert.equal(orders[0].indications, "Alisado radicular a campo cerrado en 33, 45.");
+  assert.equal(orders[1].quantity, 3);
+  assert.equal(orders[2].indications, "Drenaje periodontal en 26.");
+});
+
+test("el resumen conserva drenajes pero no solicita ajustes por movilidad", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "Dentalink - Resumen periodontograma.user.js"),
+    "utf8"
+  );
+
+  assert.match(source, /requestLines\.push\(`- \[240401\] Drenaje periodontal/);
+  assert.doesNotMatch(source, /requestLines\.push\(`- \[248201\] Ajuste oclusal/);
+});
+
+test("el resumen abre todas las órdenes mediante Tampermonkey", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "Dentalink - Resumen periodontograma.user.js"),
+    "utf8"
+  );
+
+  assert.match(source, /@grant\s+GM_openInTab/);
+  assert.match(source, /GM_openInTab\(url,\s*\{\s*active:\s*false,\s*insert:\s*true\s*\}\)/);
+  assert.match(source, /window\.open\(url, "_blank"\)/);
+  assert.match(source, /window\.setTimeout\(\(\) => openDraft\(draft\), index \* 1800\)/);
+});
+
+test("el resumen crea órdenes sin depender de utilidades compartidas", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "Dentalink - Resumen periodontograma.user.js"),
+    "utf8"
+  );
+
+  assert.match(source, /function buildOrderItemsFromPeriodontogram\(\)/);
+  assert.match(source, /const items = buildOrderItemsFromPeriodontogram\(\)/);
+  assert.match(source, /const justification = buildFallbackValuationText\(summary\)/);
+  assert.doesNotMatch(source, /sharedBuild(?:ValuationText|OrderItems)/);
+});
+
+test("el resumen mantiene todas sus utilidades dentro del sandbox de Tampermonkey", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "Dentalink - Resumen periodontograma.user.js"),
+    "utf8"
+  );
+
+  assert.match(source, /@grant\s+GM_openInTab/);
+  assert.doesNotMatch(source, /@grant\s+unsafeWindow/);
+  assert.doesNotMatch(source, /@require/);
+  assert.match(source, /const watchPage = \(callback, options = \{\}\) =>/);
+  assert.match(source, /const registerPanel = \(panel, options = \{\}\) =>/);
+  assert.match(source, /panel\.style\.position = "fixed"/);
 });
 
 test("el panel de evoluciones sigue iniciando con la versión anterior de utilidades", () => {
