@@ -37,30 +37,43 @@ function loadUtils(existingUtils = null) {
   return context.window.__dlkUtils;
 }
 
-function loadEvolutionsWithLegacyUtils() {
+function loadEvolutions(progressUtils = null, options = {}) {
+  const sessionRecords = new Map();
+  const sharedUtils = progressUtils
+    ? {
+      ...progressUtils,
+      isVisible: () => true,
+      escapeHtml: (value) => String(value),
+      getPatientIdFromUrl: () => "123",
+      watchPage() {}
+    }
+    : {
+      isVisible: () => true,
+      escapeHtml: (value) => String(value),
+      getPatientIdFromUrl: () => "123",
+      watchPage() {}
+    };
   const context = {
     window: {
-      __dlkUtils: {
-        isVisible: () => true,
-        escapeHtml: (value) => String(value),
-        getPatientIdFromUrl: () => "123",
-        watchPage() {}
-      },
+      __dlkUtils: sharedUtils,
       addEventListener() {},
       setTimeout() { return 1; }
     },
     document: {
       body: {},
       addEventListener() {},
-      querySelectorAll() { return []; },
+      querySelectorAll(selector) { return options.querySelectorAll?.(selector) || []; },
       getElementById() { return null; }
     },
     location: {
-      pathname: "/pacientes/123/ficha/evoluciones",
-      href: "https://demo.dentalink.cl/pacientes/123/ficha/evoluciones"
+      pathname: options.pathname || "/pacientes/123/ficha/evoluciones",
+      href: `https://demo.dentalink.cl${options.pathname || "/pacientes/123/ficha/evoluciones"}`
     },
     localStorage: { getItem() { return null; } },
-    sessionStorage: { getItem() { return null; } },
+    sessionStorage: {
+      getItem(key) { return sessionRecords.get(key) ?? null; },
+      setItem(key, value) { sessionRecords.set(key, value); }
+    },
     Element: class {},
     MutationObserver: class {}
   };
@@ -71,7 +84,7 @@ function loadEvolutionsWithLegacyUtils() {
   );
   source = source.replace(
     /\n\}\)\(\);\s*$/,
-    "\n  globalThis.__compatTest = { getCurrentPeriodontalProgress, treatmentCategory };\n})();"
+    "\n  globalThis.__compatTest = { getCurrentPeriodontalProgress, treatmentCategory, getOpenTreatmentContext, groupedTreatmentKey, isGroupedTreatmentCompleted, shouldOpenGroupedTreatmentPrompt, markGroupedTreatmentCompleted, unmarkGroupedTreatmentCompleted, applyGroupedTreatmentCompletions };\n})();"
   );
   vm.runInContext(source, context);
   return context.__compatTest;
@@ -273,8 +286,139 @@ test("el resumen mantiene todas sus utilidades dentro del sandbox de Tampermonke
 });
 
 test("el panel de evoluciones sigue iniciando con la versión anterior de utilidades", () => {
-  const evolutions = loadEvolutionsWithLegacyUtils();
+  const evolutions = loadEvolutions();
   assert.equal(evolutions.getCurrentPeriodontalProgress(), null);
   assert.equal(evolutions.treatmentCategory("240301", "Campo cerrado"), "closed");
   assert.equal(evolutions.treatmentCategory("240401", "Drenaje periodontal"), "drainage");
+});
+
+test("agrupa el procedimiento sin depender del círculo ni del orden de las piezas", () => {
+  const evolutions = loadEvolutions();
+  const firstClick = {
+    patientId: "123",
+    planId: "987",
+    category: "open",
+    teeth: ["21", "11", "16"]
+  };
+  const anotherCircle = { ...firstClick, teeth: ["16", "21", "11"] };
+  const changedToothList = { ...firstClick, teeth: ["11"] };
+
+  assert.equal(
+    evolutions.groupedTreatmentKey(firstClick),
+    evolutions.groupedTreatmentKey(anotherCircle)
+  );
+  assert.equal(
+    evolutions.groupedTreatmentKey(firstClick),
+    evolutions.groupedTreatmentKey(changedToothList)
+  );
+  assert.equal(evolutions.isGroupedTreatmentCompleted(anotherCircle), false);
+  assert.equal(
+    evolutions.shouldOpenGroupedTreatmentPrompt({ context: anotherCircle }),
+    true
+  );
+
+  evolutions.markGroupedTreatmentCompleted(firstClick);
+  assert.equal(evolutions.isGroupedTreatmentCompleted(anotherCircle), true);
+  assert.equal(
+    evolutions.shouldOpenGroupedTreatmentPrompt({ context: anotherCircle }),
+    false
+  );
+
+  evolutions.unmarkGroupedTreatmentCompleted(firstClick);
+  assert.equal(evolutions.isGroupedTreatmentCompleted(anotherCircle), false);
+  assert.equal(
+    evolutions.shouldOpenGroupedTreatmentPrompt({ context: anotherCircle }),
+    true
+  );
+});
+
+test("el primer círculo reúne todas las piezas del mismo procedimiento", () => {
+  const treatmentRow = (name, tooth) => ({
+    querySelector(selector) {
+      if (selector.includes("row-nombre")) return { textContent: name };
+      if (selector === ".row-pieza") return { textContent: `Pieza ${tooth}` };
+      return null;
+    }
+  });
+  const rows = [
+    treatmentRow("[242201] Curetage a campo abierto", "2.1"),
+    treatmentRow("[240301] Alisado radicular a campo cerrado", "1.6"),
+    treatmentRow("[242201] Curetage a campo abierto", "1.1")
+  ];
+  const nameCells = rows.map((parentElement) => ({ parentElement }));
+  const evolutions = loadEvolutions(null, {
+    pathname: "/pacientes/123/tratamiento/987",
+    querySelectorAll(selector) {
+      if (selector === ".row-nombre") return nameCells;
+      if (selector === "h2") return [{ textContent: "2026-08-01 Plan periodontal" }];
+      return [];
+    }
+  });
+
+  const context = evolutions.getOpenTreatmentContext("open");
+  assert.equal(context.patientId, "123");
+  assert.equal(context.planId, "987");
+  assert.equal(context.category, "open");
+  assert.deepEqual([...context.teeth], ["11", "21"]);
+});
+
+test("aísla la evolución agrupada por paciente, plan y procedimiento", () => {
+  const utils = loadUtils();
+  const evolutions = loadEvolutions(utils);
+  const progress = utils.calculatePeriodontalProgress([
+    "Se solicita autorización para realizar:",
+    "- [242201] Campo abierto en 11, 21.",
+    "- [240301] Campo cerrado en 16."
+  ].join("\n"));
+
+  evolutions.markGroupedTreatmentCompleted({
+    patientId: "999",
+    planId: "987",
+    category: "open",
+    teeth: ["11", "21"]
+  });
+  evolutions.markGroupedTreatmentCompleted({
+    patientId: "123",
+    planId: "654",
+    category: "closed",
+    teeth: ["16"]
+  });
+
+  const isolated = evolutions.applyGroupedTreatmentCompletions(progress, "123", "987");
+  assert.equal(isolated.completedCount, 0);
+
+  evolutions.markGroupedTreatmentCompleted({
+    patientId: "123",
+    planId: "987",
+    category: "open",
+    teeth: ["21", "11"]
+  });
+  const openCompleted = evolutions.applyGroupedTreatmentCompletions(progress, "123", "987");
+  assert.equal(openCompleted.completedCount, 2);
+  assert.equal(openCompleted.pendingCount, 1);
+  assert.equal(openCompleted.controlled, false);
+
+  evolutions.markGroupedTreatmentCompleted({
+    patientId: "123",
+    planId: "987",
+    category: "closed",
+    teeth: ["16"]
+  });
+  const allCompleted = evolutions.applyGroupedTreatmentCompletions(progress, "123", "987");
+  assert.equal(allCompleted.completedCount, 3);
+  assert.equal(allCompleted.pendingCount, 0);
+  assert.equal(allCompleted.controlled, true);
+});
+
+test("la captura del procedimiento usa todas sus filas y no solo los círculos pendientes", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "Dentalink - Evoluciones periodoncia.user.js"),
+    "utf8"
+  );
+
+  assert.doesNotMatch(source, /const pendingRows = rows\.filter/);
+  assert.doesNotMatch(source, /pendingPlanItems/);
+  assert.match(source, /const context = getOpenTreatmentContext\(item\.category\)/);
+  assert.match(source, /shouldOpenGroupedTreatmentPrompt\(selection\)/);
+  assert.match(source, /readOnly: Boolean\(groupedContext\)/);
 });
