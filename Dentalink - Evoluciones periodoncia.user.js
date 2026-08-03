@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.0.3
+// @version      3.1.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -93,6 +93,7 @@
   const PROGRESS_BADGE_ID = "dlk-evo-periodontal-progress";
   const PERIO_STORAGE_KEY = "dlk_periodontograma_resumen_v1";
   const ANAMNESIS_STORAGE_KEY = "dlk_anamnesis_context_v1";
+  const GROUPED_TREATMENT_STORAGE_KEY = "dlk_grouped_periodontal_treatments_v1";
   const ANAMNESIS_PATH = /\/pacientes\/\d+\/ficha\/antecedentes\b/i;
   const ANAMNESIS_FIELD_LABELS = [
     "Motivo de consulta",
@@ -123,6 +124,7 @@
   ];
   let pendingTreatmentSelection = null;
   let lastAnamnesisSignature = "";
+  const memoryGroupedTreatmentRecords = {};
 
   // ─── Helpers ───
 
@@ -166,6 +168,73 @@
     };
   }
 
+  function currentTreatmentPlanId() {
+    return location.pathname.match(/\/tratamiento\/(\d+)\b/i)?.[1] || "";
+  }
+
+  function groupedTreatmentKey(context) {
+    if (!context?.patientId || !context?.planId || !context?.category) return "";
+    return `${context.patientId}|${context.planId}|${context.category}`;
+  }
+
+  function readGroupedTreatmentRecords() {
+    try {
+      const records = JSON.parse(sessionStorage.getItem(GROUPED_TREATMENT_STORAGE_KEY) || "{}");
+      const savedRecords = records && typeof records === "object" && !Array.isArray(records)
+        ? records
+        : {};
+      return { ...savedRecords, ...memoryGroupedTreatmentRecords };
+    } catch (_) {
+      return { ...memoryGroupedTreatmentRecords };
+    }
+  }
+
+  function isGroupedTreatmentCompleted(context) {
+    const key = groupedTreatmentKey(context);
+    return Boolean(key && readGroupedTreatmentRecords()[key]);
+  }
+
+  function shouldOpenGroupedTreatmentPrompt(selection) {
+    return Boolean(selection?.context && !isGroupedTreatmentCompleted(selection.context));
+  }
+
+  function markGroupedTreatmentCompleted(context) {
+    const key = groupedTreatmentKey(context);
+    if (!key) return;
+    try {
+      const record = {
+        patientId: context.patientId,
+        planId: context.planId,
+        category: context.category,
+        teeth: [...new Set(context.teeth || [])].sort((a, b) => Number(a) - Number(b)),
+        completedAt: new Date().toISOString()
+      };
+      memoryGroupedTreatmentRecords[key] = record;
+      const records = readGroupedTreatmentRecords();
+      records[key] = record;
+      sessionStorage.setItem(GROUPED_TREATMENT_STORAGE_KEY, JSON.stringify(records));
+    } catch (_) {
+      memoryGroupedTreatmentRecords[key] = {
+        patientId: context.patientId,
+        planId: context.planId,
+        category: context.category,
+        teeth: [...new Set(context.teeth || [])].sort((a, b) => Number(a) - Number(b)),
+        completedAt: new Date().toISOString()
+      };
+    }
+  }
+
+  function unmarkGroupedTreatmentCompleted(context) {
+    const key = groupedTreatmentKey(context);
+    if (!key) return;
+    delete memoryGroupedTreatmentRecords[key];
+    try {
+      const records = readGroupedTreatmentRecords();
+      delete records[key];
+      sessionStorage.setItem(GROUPED_TREATMENT_STORAGE_KEY, JSON.stringify(records));
+    } catch (_) { /* No impide deshacer el texto del editor. */ }
+  }
+
   function rememberTreatmentSelection(event) {
     const target = event.target instanceof Element
       ? event.target.closest(".no-realizada")
@@ -175,9 +244,11 @@
     const row = treatmentRowFromElement(target);
     const item = treatmentItemFromRow(row);
     if (!item.category) return;
+    const context = getOpenTreatmentContext(item.category);
 
     pendingTreatmentSelection = {
       ...item,
+      context,
       href: location.href,
       capturedAt: Date.now()
     };
@@ -200,14 +271,14 @@
   }
 
   function getOpenTreatmentContext(category) {
-    const planId = location.pathname.match(/\/tratamiento\/(\d+)\b/i)?.[1] || "";
+    const patientId = getPatientIdFromUrl();
+    const planId = currentTreatmentPlanId();
     if (!planId || !category) return null;
     const treatment = periodontalTreatmentByKey(category);
 
     const rows = [...document.querySelectorAll(".row-nombre")]
       .map((nameCell) => nameCell.parentElement);
-    const pendingRows = rows.filter((row) => row.querySelector(".no-realizada"));
-    const items = (pendingRows.length ? pendingRows : rows)
+    const items = rows
       .map((row) => treatmentItemFromRow(row))
       .filter((item) => item.category === category
         && (treatment?.scope === "procedure" || item.tooth));
@@ -222,7 +293,9 @@
       .find((text) => /^\d{4}[/-]\d{2}[/-]\d{2}\b/.test(text)) || "";
 
     return {
+      patientId,
       planId,
+      category,
       planTitle,
       cups: firstItem.cups,
       procedure: firstItem.procedure,
@@ -258,28 +331,38 @@
       : null;
     const planRows = [...document.querySelectorAll(".row-nombre")]
       .map((nameCell) => nameCell.parentElement)
-      .map((row) => ({
-        item: treatmentItemFromRow(row),
-        pending: Boolean(row.querySelector(".no-realizada"))
-      }))
-      .filter(({ item }) => item.category);
+      .map((row) => treatmentItemFromRow(row))
+      .filter((item) => item.category);
     const planText = planRows.length
       ? [
         "Se solicita autorización para realizar:",
-        ...planRows.map(({ item }) =>
+        ...planRows.map((item) =>
           `- [${item.cups}] ${item.procedure}${item.tooth ? ` en ${item.tooth}` : ""}.`)
       ].join("\n")
       : "";
     let planProgress = planText ? calculatePeriodontalProgress(planText) : null;
-    const planItemKey = (item) => `${item.category}|${item.tooth || "procedimiento"}`;
-    const pendingPlanItems = new Set(
-      planRows.filter(({ pending }) => pending).map(({ item }) => planItemKey(item))
+    planProgress = applyGroupedTreatmentCompletions(
+      planProgress,
+      patientId,
+      currentTreatmentPlanId()
     );
-    planRows.filter(({ pending, item }) => !pending && !pendingPlanItems.has(planItemKey(item)))
-      .forEach(({ item }) => {
-      planProgress = applyPeriodontalCompletion(planProgress, item.category, item.tooth);
-      });
     return planProgress || storedProgress || valuationProgress;
+  }
+
+  function applyGroupedTreatmentCompletions(progress, patientId, planId) {
+    let nextProgress = progress;
+    if (!nextProgress || !patientId || !planId) return nextProgress;
+
+    Object.values(readGroupedTreatmentRecords())
+      .filter((record) => record?.patientId === patientId && record?.planId === planId)
+      .forEach((record) => {
+        nextProgress = applyPeriodontalCompletion(
+          nextProgress,
+          record.category,
+          record.teeth
+        );
+      });
+    return nextProgress;
   }
 
   function appendPeriodontalProgressNote(text, progress) {
@@ -293,12 +376,24 @@
     return `${text.slice(0, providerIndex)}\n\n${note}${text.slice(providerIndex)}`;
   }
 
-  function insertTreatmentText(text, treatmentKey = "", teeth = "") {
+  function insertTreatmentText(text, treatmentKey = "", teeth = "", groupedContext = null) {
     const currentProgress = getCurrentPeriodontalProgress();
+    const completionTeeth = groupedContext?.teeth?.length ? groupedContext.teeth : teeth;
     const resultingProgress = treatmentKey
-      ? applyPeriodontalCompletion(currentProgress, treatmentKey, teeth)
+      ? applyPeriodontalCompletion(currentProgress, treatmentKey, completionTeeth)
       : currentProgress;
-    return insertText(appendPeriodontalProgressNote(text, resultingProgress));
+    const inserted = insertText(
+      appendPeriodontalProgressNote(text, resultingProgress),
+      groupedContext ? () => {
+        unmarkGroupedTreatmentCompleted(groupedContext);
+        schedulePanel();
+      } : null
+    );
+    if (inserted && groupedContext) {
+      markGroupedTreatmentCompleted(groupedContext);
+      window.setTimeout(schedulePanel, 0);
+    }
+    return inserted;
   }
 
   function isAnamnesisPage() {
@@ -1009,7 +1104,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
             <label for="dlk-evo-${f.name}">${escapeHtml(f.label)}</label>
             ${f.type === "select"
               ? `<select id="dlk-evo-${f.name}" name="${f.name}">${f.options.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === f.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`
-              : `<input id="dlk-evo-${f.name}" name="${f.name}" autocomplete="off" value="${escapeHtml(f.value || "")}"${f.autoAnesthesiaFrom ? ` data-auto-anesthesia-from="${escapeHtml(f.autoAnesthesiaFrom)}" data-auto-anesthesia-default="${escapeHtml(f.value || "")}"` : ""}>`}
+              : `<input id="dlk-evo-${f.name}" name="${f.name}" autocomplete="off" value="${escapeHtml(f.value || "")}"${f.readOnly ? " readonly" : ""}${f.autoAnesthesiaFrom ? ` data-auto-anesthesia-from="${escapeHtml(f.autoAnesthesiaFrom)}" data-auto-anesthesia-default="${escapeHtml(f.value || "")}"` : ""}>`}
           </div>
         `).join("")}
         <div class="actions">
@@ -1088,10 +1183,10 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     "Campo cerrado, campo abierto y drenaje se incluyen automáticamente desde el periodontograma.");
   }
 
-  function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration, allowNoAnesthesia = false, category = "") {
-    const treatmentContext = getOpenTreatmentContext(category);
+  function openAlisadoPrompt(title, builder, defaultCarpules, defaultTecnica, defaultDuration, allowNoAnesthesia = false, category = "", contextOverride = null, groupedContext = null) {
+    const treatmentContext = contextOverride || getOpenTreatmentContext(category);
     const fields = [
-      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "" },
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
       { name: "carpules", label: "Carpules en total", value: String(defaultCarpules), dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
       { name: "tecnica", label: "Técnica anestésica", value: defaultTecnica, autoAnesthesiaFrom: "dientes", dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
       { name: "duracion", label: "Duración de la cita (minutos)", value: String(defaultDuration) }
@@ -1111,61 +1206,65 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     openFormPrompt(
       title,
       fields,
-      (values) => insertTreatmentText(builder(values), category, values.dientes),
+      (values) => insertTreatmentText(builder(values), category, values.dientes, groupedContext),
       treatmentContextText(treatmentContext)
     );
   }
 
-  function openAlargamientoPrompt() {
-    const treatmentContext = getOpenTreatmentContext("crown_lengthening");
+  function openAlargamientoPrompt(contextOverride = null, groupedContext = null) {
+    const treatmentContext = contextOverride || getOpenTreatmentContext("crown_lengthening");
     openFormPrompt("Alargamiento", [
-      { name: "diente", label: "Diente", value: treatmentContext?.teeth[0] || "" },
+      { name: "diente", label: "Diente(s)", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
       { name: "restauracion", label: "Restauración", value: "" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "60" }
     ], (values) => insertTreatmentText(
       buildAlargamientoText(values),
       "crown_lengthening",
-      values.diente
+      values.diente,
+      groupedContext
     ), treatmentContextText(treatmentContext));
   }
 
-  function openDetartrajePrompt() {
-    const treatmentContext = getOpenTreatmentContext("scaling");
+  function openDetartrajePrompt(contextOverride = null, groupedContext = null) {
+    const treatmentContext = contextOverride || getOpenTreatmentContext("scaling");
     openFormPrompt("Detartraje", [
-      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "" },
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
     ], (values) => insertTreatmentText(
       buildDetartrajeText(values),
       "scaling",
-      values.dientes
+      values.dientes,
+      groupedContext
     ), treatmentContextText(treatmentContext));
   }
 
-  function openAjusteOclusalPrompt() {
-    const treatmentContext = getOpenTreatmentContext("occlusal_adjustment");
+  function openAjusteOclusalPrompt(contextOverride = null, groupedContext = null) {
+    const treatmentContext = contextOverride || getOpenTreatmentContext("occlusal_adjustment");
     openFormPrompt("Ajuste oclusal", [
-      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "" }
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) }
     ], (values) => insertTreatmentText(
       buildAjusteOclusalText(values),
       "occlusal_adjustment",
-      values.dientes
+      values.dientes,
+      groupedContext
     ), treatmentContextText(treatmentContext));
   }
 
-  function openDrenajePrompt() {
-    const treatmentContext = getOpenTreatmentContext("drainage");
+  function openDrenajePrompt(contextOverride = null, groupedContext = null) {
+    const treatmentContext = contextOverride || getOpenTreatmentContext("drainage");
     openFormPrompt("Drenaje periodontal", [
-      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "" }
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) }
     ], (values) => insertTreatmentText(
       buildDrenajeText(values),
       "drainage",
-      values.dientes
+      values.dientes,
+      groupedContext
     ), treatmentContextText(treatmentContext));
   }
 
-  function openFrenillectomiaPrompt() {
-    const treatmentContext = getOpenTreatmentContext("frenectomy");
+  function openFrenillectomiaPrompt(contextOverride = null, groupedContext = null) {
+    const treatmentContext = contextOverride || getOpenTreatmentContext("frenectomy");
     openFormPrompt("Frenillectomía", [
       { name: "frenillo", label: "Tipo de frenillo (labial superior, labial inferior, lingual)", value: "labial superior" },
       { name: "carpules", label: "Carpules en total", value: "1" },
@@ -1173,7 +1272,9 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
     ], (values) => insertTreatmentText(
       buildFrenillectomiaText(values),
-      "frenectomy"
+      "frenectomy",
+      "",
+      groupedContext
     ), treatmentContextText(treatmentContext));
   }
 
@@ -1184,21 +1285,22 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   function openPromptForRememberedTreatment() {
     if (document.getElementById(MODAL_ID)) return;
     const selection = consumeTreatmentSelection();
-    if (!selection) return;
+    if (!shouldOpenGroupedTreatmentPrompt(selection)) return;
+    const groupedContext = selection.context;
 
     if (selection.category === "closed") {
-      openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45, true, "closed");
+      openAlisadoPrompt("Alisado cerrado", buildAlisadoCerradoText, 1, "Infiltrativa", 45, true, "closed", groupedContext, groupedContext);
       return;
     }
     if (selection.category === "open") {
-      openAlisadoPrompt("Alisado abierto", buildAlisadoAbiertoText, 2, "Infiltrativa", 60, false, "open");
+      openAlisadoPrompt("Alisado abierto", buildAlisadoAbiertoText, 2, "Infiltrativa", 60, false, "open", groupedContext, groupedContext);
       return;
     }
-    if (selection.category === "crown_lengthening") { openAlargamientoPrompt(); return; }
-    if (selection.category === "scaling") { openDetartrajePrompt(); return; }
-    if (selection.category === "occlusal_adjustment") { openAjusteOclusalPrompt(); return; }
-    if (selection.category === "drainage") { openDrenajePrompt(); return; }
-    if (selection.category === "frenectomy") openFrenillectomiaPrompt();
+    if (selection.category === "crown_lengthening") { openAlargamientoPrompt(groupedContext, groupedContext); return; }
+    if (selection.category === "scaling") { openDetartrajePrompt(groupedContext, groupedContext); return; }
+    if (selection.category === "occlusal_adjustment") { openAjusteOclusalPrompt(groupedContext, groupedContext); return; }
+    if (selection.category === "drainage") { openDrenajePrompt(groupedContext, groupedContext); return; }
+    if (selection.category === "frenectomy") openFrenillectomiaPrompt(groupedContext, groupedContext);
   }
 
   function handleButton(label) {
