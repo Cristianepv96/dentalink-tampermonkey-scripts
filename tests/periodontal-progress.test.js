@@ -69,7 +69,9 @@ function loadEvolutions(progressUtils = null, options = {}) {
       pathname: options.pathname || "/pacientes/123/ficha/evoluciones",
       href: `https://demo.dentalink.cl${options.pathname || "/pacientes/123/ficha/evoluciones"}`
     },
-    localStorage: { getItem() { return null; } },
+    localStorage: {
+      getItem(key) { return options.localStorage?.[key] ?? null; }
+    },
     sessionStorage: {
       getItem(key) { return sessionRecords.get(key) ?? null; },
       setItem(key, value) { sessionRecords.set(key, value); }
@@ -84,7 +86,7 @@ function loadEvolutions(progressUtils = null, options = {}) {
   );
   source = source.replace(
     /\n\}\)\(\);\s*$/,
-    "\n  globalThis.__compatTest = { getCurrentPeriodontalProgress, treatmentCategory, getOpenTreatmentContext, groupedTreatmentKey, isGroupedTreatmentCompleted, shouldOpenGroupedTreatmentPrompt, markGroupedTreatmentCompleted, unmarkGroupedTreatmentCompleted, applyGroupedTreatmentCompletions };\n})();"
+    "\n  globalThis.__compatTest = { getCurrentPeriodontalProgress, treatmentCategory, getOpenTreatmentContext, groupedTreatmentKey, isGroupedTreatmentCompleted, shouldOpenGroupedTreatmentPrompt, markGroupedTreatmentCompleted, unmarkGroupedTreatmentCompleted, applyGroupedTreatmentCompletions, applyPlanTreatmentCompletions, applyProgressCompletionEvidence };\n})();"
   );
   vm.runInContext(source, context);
   return context.__compatTest;
@@ -421,4 +423,89 @@ test("la captura del procedimiento usa todas sus filas y no solo los círculos p
   assert.match(source, /const context = getOpenTreatmentContext\(item\.category\)/);
   assert.match(source, /shouldOpenGroupedTreatmentPrompt\(selection\)/);
   assert.match(source, /readOnly: Boolean\(groupedContext\)/);
+});
+
+test("el plan del día completa sus filas sin ocultar los pendientes del plan global", () => {
+  const utils = loadUtils();
+  const globalSummary = [
+    "Se solicita autorización para realizar:",
+    "- [240301] Raspaje y alisado radicular a campo cerrado en 16, 17, 24, 25, 34, 35, 44, 45, 46, 47.",
+    "- [242201] Raspaje y alisado radicular a campo abierto en 12, 13.",
+    "- [240401] Drenaje periodontal en 12."
+  ].join("\n");
+  const treatmentRow = (name, tooth) => ({
+    querySelector(selector) {
+      if (selector.includes("row-nombre")) return { textContent: name };
+      if (selector === ".row-pieza") return { textContent: `Pieza ${tooth}` };
+      return null;
+    }
+  });
+  const rows = ["24", "25", "34", "35"].map((tooth) =>
+    treatmentRow("[240301] Raspaje y alisado radicular a campo cerrado", tooth)
+  );
+  const evolutions = loadEvolutions(utils, {
+    pathname: "/pacientes/123/tratamiento/987",
+    localStorage: {
+      dlk_periodontograma_resumen_v1: JSON.stringify({
+        123: { text: globalSummary }
+      })
+    },
+    querySelectorAll(selector) {
+      if (selector === ".row-nombre") return rows.map((parentElement) => ({ parentElement }));
+      return [];
+    }
+  });
+
+  const progress = evolutions.getCurrentPeriodontalProgress();
+  const closed = progress.treatments.find((item) => item.key === "closed");
+
+  assert.equal(progress.total, 13);
+  assert.equal(progress.completedCount, 4);
+  assert.equal(progress.pendingCount, 9);
+  assert.equal(progress.controlled, false);
+  assert.equal(progress.hasGlobalBaseline, true);
+  assert.deepEqual([...closed.completed], ["24", "25", "34", "35"]);
+  assert.deepEqual([...closed.pending], ["16", "17", "44", "45", "46", "47"]);
+});
+
+test("no muestra como pendiente otro procedimiento incluido en el mismo plan del día", () => {
+  const utils = loadUtils();
+  const globalSummary = [
+    "Se solicita autorización para realizar:",
+    "- [240301] Campo cerrado en 24, 25, 34, 35, 44.",
+    "- [242201] Campo abierto en 12, 13, 16."
+  ].join("\n");
+  const treatmentRow = (name, tooth) => ({
+    querySelector(selector) {
+      if (selector.includes("row-nombre")) return { textContent: name };
+      if (selector === ".row-pieza") return { textContent: `Pieza ${tooth}` };
+      return null;
+    }
+  });
+  const rows = [
+    treatmentRow("[240301] Campo cerrado", "24"),
+    treatmentRow("[240301] Campo cerrado", "25"),
+    treatmentRow("[242201] Campo abierto", "12"),
+    treatmentRow("[242201] Campo abierto", "13")
+  ];
+  const evolutions = loadEvolutions(utils, {
+    pathname: "/pacientes/123/tratamiento/987",
+    localStorage: {
+      dlk_periodontograma_resumen_v1: JSON.stringify({
+        123: { text: globalSummary }
+      })
+    },
+    querySelectorAll(selector) {
+      if (selector === ".row-nombre") return rows.map((parentElement) => ({ parentElement }));
+      return [];
+    }
+  });
+
+  const progress = evolutions.getCurrentPeriodontalProgress();
+  const open = progress.treatments.find((item) => item.key === "open");
+
+  assert.deepEqual([...open.completed], ["12", "13"]);
+  assert.deepEqual([...open.pending], ["16"]);
+  assert.equal(progress.pendingCount, 4);
+  assert.equal(progress.controlled, false);
 });

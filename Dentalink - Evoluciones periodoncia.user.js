@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.1.0
+// @version      3.1.1
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -340,13 +340,63 @@
           `- [${item.cups}] ${item.procedure}${item.tooth ? ` en ${item.tooth}` : ""}.`)
       ].join("\n")
       : "";
-    let planProgress = planText ? calculatePeriodontalProgress(planText) : null;
-    planProgress = applyGroupedTreatmentCompletions(
-      planProgress,
+    const planProgress = planText ? calculatePeriodontalProgress(planText) : null;
+    const globalProgress = valuationProgress?.total
+      ? valuationProgress
+      : storedProgress?.total ? storedProgress : null;
+    let progress = globalProgress || planProgress;
+
+    // El resumen del periodontograma define el universo global. El avance
+    // condensado aporta evidencia de procedimientos ya realizados, pero nunca
+    // debe reemplazar ese universo por las pocas filas del plan de hoy.
+    if (valuationProgress?.total && storedProgress?.total) {
+      progress = applyProgressCompletionEvidence(progress, storedProgress);
+    }
+
+    // Dentalink agrupa en este plan todo lo que se realizará en la sesión. Al
+    // redactar cualquiera de sus evoluciones, se proyectan todas esas filas
+    // para no informar como pendiente otro procedimiento que se evolucionará
+    // inmediatamente dentro del mismo plan.
+    progress = applyPlanTreatmentCompletions(progress, planRows);
+    progress = applyGroupedTreatmentCompletions(
+      progress,
       patientId,
       currentTreatmentPlanId()
     );
-    return planProgress || storedProgress || valuationProgress;
+    if (progress) progress.hasGlobalBaseline = Boolean(globalProgress);
+    return progress;
+  }
+
+  function applyProgressCompletionEvidence(progress, evidence) {
+    let nextProgress = progress;
+    if (!nextProgress || !evidence?.treatments) return nextProgress;
+
+    evidence.treatments.forEach((treatment) => {
+      if (!treatment?.completed?.length) return;
+      nextProgress = applyPeriodontalCompletion(
+        nextProgress,
+        treatment.key,
+        treatment.completed
+      );
+    });
+    return nextProgress;
+  }
+
+  function applyPlanTreatmentCompletions(progress, planItems) {
+    let nextProgress = progress;
+    if (!nextProgress || !planItems?.length) return nextProgress;
+
+    const completions = new Map();
+    planItems.forEach((item) => {
+      if (!item?.category) return;
+      const items = completions.get(item.category) || [];
+      if (item.tooth) items.push(item.tooth);
+      completions.set(item.category, items);
+    });
+    completions.forEach((teeth, category) => {
+      nextProgress = applyPeriodontalCompletion(nextProgress, category, teeth);
+    });
+    return nextProgress;
   }
 
   function applyGroupedTreatmentCompletions(progress, patientId, planId) {
@@ -366,7 +416,12 @@
   }
 
   function appendPeriodontalProgressNote(text, progress) {
-    const note = formatPeriodontalProgressNote(progress);
+    const note = progress?.hasGlobalBaseline === false && progress.pendingCount === 0
+      ? [
+        "ESTADO DEL TRATAMIENTO PERIODONTAL",
+        "Plan de la sesión completado. El avance periodontal global no está sincronizado; no se determina todavía que el paciente esté controlado."
+      ].join("\n")
+      : formatPeriodontalProgressNote(progress);
     if (!note || text.includes("ESTADO DEL TRATAMIENTO PERIODONTAL")
       || text.includes("TRATAMIENTO PERIODONTAL PENDIENTE")) return text;
 
@@ -1379,9 +1434,15 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       return;
     }
 
-    if (progress.pendingCount === 0) {
+    if (progress.pendingCount === 0 && progress.hasGlobalBaseline !== false) {
       badge.className = "controlled";
       badge.textContent = "✓ Paciente controlado por periodoncia";
+      return;
+    }
+
+    if (progress.pendingCount === 0) {
+      badge.className = "missing";
+      badge.textContent = "Plan de hoy completo · avance global no sincronizado";
       return;
     }
 

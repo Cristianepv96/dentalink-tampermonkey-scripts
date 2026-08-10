@@ -1,0 +1,648 @@
+// ==UserScript==
+// @name         Dentalink - Condensación de evoluciones
+// @namespace    san-jose-ips-odontologica
+// @version      0.5.1
+// @description  Resume localmente el avance periodontal en la ficha de evoluciones.
+// @match        https://*.dentalink.cl/*
+// @grant        none
+// @run-at       document-start
+// @noframes
+// ==/UserScript==
+
+(function () {
+  'use strict';
+
+  const CARD_ID = 'sj-periodontal-summary';
+  const STYLE_ID = 'sj-periodontal-summary-styles';
+  const GROUP_SUMMARY_CLASS = 'sj-periodontal-group-summary';
+  const COLLAPSED_ENTRY_CLASS = 'sj-periodontal-collapsed-entry';
+  const COMPLETED_ENTRY_CLASS = 'sj-periodontal-completed-entry';
+  const COMPLETED_BADGE_CLASS = 'sj-periodontal-completed-badge';
+  const SCRIPT_VERSION = '0.5.1';
+  const PROFESSIONAL_NAME = 'CRISTIAN EDUARDO PEÑA VILLAMIZAR';
+  const PAGE_PATTERN = /\/pacientes\/\d+\/ficha\/evoluciones/;
+  let renderTimer;
+  let lastSignature = '';
+  let lastPath = location.pathname;
+  let lastSourceText = '';
+  let sourceBeforeNavigation = '';
+  let awaitingNewPatientContent = false;
+  let lastAttemptedPath = '';
+  let observer;
+  let observedRoot;
+
+  function teethFrom(text) {
+    return [...text.matchAll(/\b([1-4])\s*\.?\s*([1-8])\b/g)]
+      .map((match) => Number(`${match[1]}${match[2]}`));
+  }
+
+  function sortedUnique(values) {
+    return [...new Set(values)].sort((a, b) => a - b);
+  }
+
+  function normalizeName(value) {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  }
+
+  function treatmentCategory(value) {
+    const normalized = normalizeName(value);
+    const isPeriodontalAction = /ALISAD|CURETAJ|RASP/.test(normalized);
+    if (!isPeriodontalAction) return null;
+    if (/ABIERTO/.test(normalized)) return 'open';
+    if (/CERRADO/.test(normalized)) return 'closed';
+    return null;
+  }
+
+  function categoryLabel(category) {
+    return category === 'open' ? 'Campo abierto' : 'Campo cerrado';
+  }
+
+  function onlyProfessionalEntries(text) {
+    const expectedName = normalizeName(PROFESSIONAL_NAME);
+    const selectedLines = [];
+    let include = false;
+
+    for (const line of text.split('\n')) {
+      const header = line.trim().match(/^(.+?)\s+\(#\d+\)$/);
+      if (header) include = normalizeName(header[1]) === expectedName;
+      if (include) selectedLines.push(line);
+    }
+
+    return selectedLines.join('\n');
+  }
+
+  function formatTeeth(values) {
+    if (!values.length) return '—';
+    if (values.length === 1) return String(values[0]);
+    return `${values.slice(0, -1).join(', ')} y ${values.at(-1)}`;
+  }
+
+  function findRequestedTreatments(text) {
+    const requested = { open: [], closed: [] };
+    const blocks = [...text.matchAll(
+      /Se solicita autorizaci[oó]n para realizar:([\s\S]*?)(?=NOTA IMPORTANTE|ATENDIDO POR|Firmas|$)/gi,
+    )];
+
+    const sources = blocks.length ? blocks.map((match) => match[1]) : [text];
+    for (const source of sources) {
+      for (const line of source.split('\n')) {
+        const category = treatmentCategory(line);
+        if (!category) continue;
+        requested[category].push(...teethFrom(line));
+      }
+    }
+
+    requested.open = sortedUnique(requested.open);
+    requested.closed = sortedUnique(requested.closed);
+    return requested;
+  }
+
+  function findCompletedTreatments(text) {
+    const completed = { open: [], closed: [] };
+    const segments = text.split(/(?=Acci[oó]n realizada:)/i);
+
+    for (const segment of segments) {
+      const actionLine = segment.split('\n')[0] || '';
+      let category;
+
+      category = treatmentCategory(actionLine);
+      if (!category) continue;
+
+      const piece = actionLine.match(/Pieza\s+([1-4])\s*\.?\s*([1-8])\b/i);
+      if (piece) completed[category].push(Number(`${piece[1]}${piece[2]}`));
+
+      const expandedTeeth = segment.match(/Dientes:\s*([^\n.]+)/i);
+      if (expandedTeeth) completed[category].push(...teethFrom(expandedTeeth[1]));
+    }
+
+    completed.open = sortedUnique(completed.open);
+    completed.closed = sortedUnique(completed.closed);
+    return completed;
+  }
+
+  function intersection(values, allowed) {
+    const allowedSet = new Set(allowed);
+    return values.filter((value) => allowedSet.has(value));
+  }
+
+  function difference(values, excluded) {
+    const excludedSet = new Set(excluded);
+    return values.filter((value) => !excludedSet.has(value));
+  }
+
+  function calculateSummary(text) {
+    const requested = findRequestedTreatments(text);
+    const completedRaw = findCompletedTreatments(text);
+    const requestedAll = sortedUnique([...requested.open, ...requested.closed]);
+
+    if (!requestedAll.length) return null;
+
+    const completedOpen = intersection(completedRaw.open, requested.open);
+    const completedClosed = intersection(completedRaw.closed, requested.closed);
+    const completedAll = sortedUnique([...completedOpen, ...completedClosed]);
+    const pendingOpen = difference(requested.open, completedOpen);
+    const pendingClosed = difference(requested.closed, completedClosed);
+    const pendingCount = pendingOpen.length + pendingClosed.length;
+    const percent = Math.round((completedAll.length / requestedAll.length) * 100);
+
+    return {
+      percent,
+      pendingCount,
+      pendingOpen,
+      pendingClosed,
+      completedOpen,
+      completedClosed,
+      completedAll,
+      total: requestedAll.length,
+    };
+  }
+
+  function addStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      #${CARD_ID} {
+        box-sizing: border-box;
+        width: calc(100% - 40px);
+        max-width: 620px;
+        margin: 16px 20px 20px;
+        padding: 18px 20px;
+        border: 1px solid #dce4e8;
+        border-left: 4px solid #16836f;
+        border-radius: 10px;
+        background: #ffffff;
+        box-shadow: 0 2px 8px rgba(31, 50, 59, 0.08);
+        color: #25343b;
+        font-family: inherit;
+      }
+      #${CARD_ID} .sj-periodontal-title {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 700;
+        line-height: 1.35;
+      }
+      #${CARD_ID} .sj-periodontal-progress {
+        height: 7px;
+        margin: 11px 0 13px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e7edef;
+      }
+      #${CARD_ID} .sj-periodontal-progress > span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: #16836f;
+        transition: width 180ms ease;
+      }
+      #${CARD_ID} .sj-periodontal-pending {
+        margin: 0 0 11px;
+        color: #4b5b62;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      #${CARD_ID} .sj-periodontal-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        margin-top: 8px;
+        font-size: 14px;
+        line-height: 1.4;
+      }
+      #${CARD_ID} .sj-periodontal-dot {
+        width: 10px;
+        height: 10px;
+        flex: 0 0 10px;
+        margin-top: 5px;
+        border-radius: 50%;
+      }
+      #${CARD_ID} .sj-periodontal-dot--open { background: #d94141; }
+      #${CARD_ID} .sj-periodontal-dot--closed { background: #ef941f; }
+      #${CARD_ID} .sj-periodontal-dot--done { background: #249653; }
+      .${GROUP_SUMMARY_CLASS} {
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid #d8e7e3;
+        border-radius: 8px;
+        background: #f4f9f8;
+        color: #34474e;
+        font-family: inherit;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      .${GROUP_SUMMARY_CLASS} strong { color: #25343b; }
+      .${GROUP_SUMMARY_CLASS} button {
+        flex: 0 0 auto;
+        padding: 5px 9px;
+        border: 1px solid #16836f;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #126c5d;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .${GROUP_SUMMARY_CLASS} button:hover { background: #eaf5f2; }
+      .${COLLAPSED_ENTRY_CLASS} {
+        box-sizing: border-box !important;
+        max-height: 0 !important;
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        border-width: 0 !important;
+        overflow: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+      .${COMPLETED_ENTRY_CLASS} {
+        box-shadow: inset 4px 0 0 #249653 !important;
+        background-image: linear-gradient(rgba(36, 150, 83, 0.045), rgba(36, 150, 83, 0.045)) !important;
+      }
+      .${COMPLETED_BADGE_CLASS} {
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        margin: 10px 12px 4px;
+        padding: 4px 8px;
+        border: 1px solid #9bd4b1;
+        border-radius: 999px;
+        background: #eaf7ef;
+        color: #207a46;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      @media print {
+        #${CARD_ID}, .${GROUP_SUMMARY_CLASS}, .${COMPLETED_BADGE_CLASS} { display: none !important; }
+        .${COLLAPSED_ENTRY_CLASS} {
+          max-height: none !important;
+          opacity: 1 !important;
+        }
+      }
+      @media (max-width: 720px) {
+        #${CARD_ID} {
+          width: calc(100% - 24px);
+          margin: 12px 12px 16px;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function makeRow(dotClass, label, values) {
+    const row = document.createElement('div');
+    row.className = 'sj-periodontal-row';
+
+    const dot = document.createElement('span');
+    dot.className = `sj-periodontal-dot ${dotClass}`;
+    dot.setAttribute('aria-hidden', 'true');
+
+    const text = document.createElement('span');
+    const strong = document.createElement('strong');
+    strong.textContent = `${label}: `;
+    text.append(strong, document.createTextNode(formatTeeth(values)));
+
+    row.append(dot, text);
+    return row;
+  }
+
+  function buildCard(summary) {
+    const card = document.createElement('section');
+    card.id = CARD_ID;
+    card.dataset.sjVersion = SCRIPT_VERSION;
+    card.setAttribute('aria-label', 'Resumen del tratamiento periodontal');
+
+    const title = document.createElement('h3');
+    title.className = 'sj-periodontal-title';
+    title.textContent = `Tratamiento periodontal — ${summary.percent} % completado`;
+
+    const progress = document.createElement('div');
+    progress.className = 'sj-periodontal-progress';
+    progress.setAttribute('role', 'progressbar');
+    progress.setAttribute('aria-valuemin', '0');
+    progress.setAttribute('aria-valuemax', '100');
+    progress.setAttribute('aria-valuenow', String(summary.percent));
+    const progressFill = document.createElement('span');
+    progressFill.style.width = `${summary.percent}%`;
+    progress.appendChild(progressFill);
+
+    const pending = document.createElement('p');
+    pending.className = 'sj-periodontal-pending';
+    pending.textContent = `${summary.pendingCount} ${summary.pendingCount === 1 ? 'procedimiento pendiente' : 'procedimientos pendientes'}`;
+
+    card.append(
+      title,
+      progress,
+      pending,
+      makeRow('sj-periodontal-dot--open', 'Campo abierto', summary.pendingOpen),
+      makeRow('sj-periodontal-dot--closed', 'Campo cerrado', summary.pendingClosed),
+      makeRow('sj-periodontal-dot--done', 'Realizado', summary.completedAll),
+    );
+
+    return card;
+  }
+
+  function parsePeriodontalEntry(element) {
+    const text = element.innerText?.trim() || '';
+    const authorHeaders = text
+      .split('\n')
+      .map((line) => line.trim().match(/^(.+?)\s+\(#\d+\)$/))
+      .filter(Boolean);
+    if (authorHeaders.length !== 1
+      || normalizeName(authorHeaders[0][1]) !== normalizeName(PROFESSIONAL_NAME)) return null;
+
+    const plan = text.match(/Plan de tratamiento\s+#(\d+)/i);
+    const actions = [...text.matchAll(/Acci[oó]n realizada:\s*([^\n]+)/gi)];
+    if (!plan || actions.length !== 1) return null;
+    const piece = actions[0][1].match(/Pieza\s+([1-4])\s*\.?\s*([1-8])\b/i);
+    const categoryKey = treatmentCategory(actions[0][1]);
+    if (!piece || !categoryKey) return null;
+    const administrativePiece = Number(`${piece[1]}${piece[2]}`);
+    const clinicalTeethLine = text.match(/Dientes:\s*([^\n.]+)/i);
+    const clinicalTeeth = clinicalTeethLine ? sortedUnique(teethFrom(clinicalTeethLine[1])) : [];
+    const reportedTeeth = clinicalTeeth.length ? clinicalTeeth : [administrativePiece];
+
+    return {
+      category: categoryLabel(categoryKey),
+      categoryKey,
+      element,
+      empty: !/PROCEDIMIENTO:/i.test(text) && /(?:^|\n)\s*-\s*(?:\n|$)/.test(text),
+      piece: administrativePiece,
+      plan: plan[1],
+      reportedTeeth,
+    };
+  }
+
+  function makeGroupSummary(group) {
+    const summary = document.createElement('div');
+    summary.className = GROUP_SUMMARY_CLASS;
+
+    const label = document.createElement('span');
+    const title = document.createElement('strong');
+    title.textContent = `Plan #${group.plan} · ${group.category}`;
+    label.append(
+      title,
+      document.createTextNode(` · Piezas ${formatTeeth(group.pieces)} · ${group.hidden.length} ${group.hidden.length === 1 ? 'registro repetido oculto' : 'registros repetidos ocultos'}`),
+    );
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = `Ver ${group.hidden.length} ${group.hidden.length === 1 ? 'registro' : 'registros'}`;
+    button.addEventListener('click', () => {
+      const currentlyCollapsed = group.hidden[0]?.classList.contains(COLLAPSED_ENTRY_CLASS);
+      for (const entry of group.hidden) {
+        entry.classList.toggle(COLLAPSED_ENTRY_CLASS, !currentlyCollapsed);
+        entry.setAttribute('aria-hidden', String(!currentlyCollapsed));
+      }
+      button.textContent = currentlyCollapsed
+        ? 'Ocultar registros repetidos'
+        : `Ver ${group.hidden.length} ${group.hidden.length === 1 ? 'registro' : 'registros'}`;
+    });
+
+    summary.append(label, button);
+    return summary;
+  }
+
+  function compactDuplicateEntries(main) {
+    const containers = [...main.querySelectorAll('div')];
+
+    for (const container of containers) {
+      if (container.dataset.sjPeriodontalCompacted === 'true') continue;
+      const children = [...container.children];
+      if (children.length < 2 || children.length > 20) continue;
+
+      const entries = children.map(parsePeriodontalEntry).filter(Boolean);
+      if (entries.length < 2) continue;
+
+      const grouped = new Map();
+      for (const entry of entries) {
+        const key = `${entry.plan}|${entry.categoryKey}`;
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push(entry);
+      }
+
+      let compacted = false;
+      for (const subgroup of grouped.values()) {
+        if (subgroup.length < 2) continue;
+        const hidden = subgroup.filter((entry) => entry.empty).map((entry) => entry.element);
+        if (!hidden.length) continue;
+
+        const group = {
+          category: subgroup[0].category,
+          hidden,
+          pieces: sortedUnique(subgroup.map((entry) => entry.piece)),
+          plan: subgroup[0].plan,
+        };
+
+        for (const entry of hidden) {
+          entry.classList.add(COLLAPSED_ENTRY_CLASS);
+          entry.setAttribute('aria-hidden', 'true');
+        }
+        subgroup[0].element.insertAdjacentElement('beforebegin', makeGroupSummary(group));
+        compacted = true;
+      }
+
+      if (compacted) container.dataset.sjPeriodontalCompacted = 'true';
+    }
+  }
+
+  function individualPeriodontalEntries(main) {
+    const parsed = [...main.querySelectorAll('div')]
+      .map(parsePeriodontalEntry)
+      .filter(Boolean);
+    const elements = new Set(parsed.map((entry) => entry.element));
+
+    return parsed.filter((entry) => {
+      let parent = entry.element.parentElement;
+      while (parent && parent !== main) {
+        if (elements.has(parent)) return false;
+        parent = parent.parentElement;
+      }
+      return true;
+    });
+  }
+
+  function highlightCompletedEntries(main, summary) {
+    const completedOpen = new Set(summary.completedOpen);
+    const completedClosed = new Set(summary.completedClosed);
+    const currentEntries = individualPeriodontalEntries(main);
+    const currentElements = new Set(currentEntries.map((entry) => entry.element));
+
+    for (const existing of main.querySelectorAll(`.${COMPLETED_ENTRY_CLASS}`)) {
+      if (currentElements.has(existing)) continue;
+      existing.classList.remove(COMPLETED_ENTRY_CLASS);
+      existing.querySelector(`.${COMPLETED_BADGE_CLASS}`)?.remove();
+    }
+
+    for (const entry of currentEntries) {
+      const completedSet = entry.categoryKey === 'open' ? completedOpen : completedClosed;
+      const realizedTeeth = entry.reportedTeeth.filter((piece) => completedSet.has(piece));
+      const completed = realizedTeeth.length > 0;
+
+      if (!completed) {
+        entry.element.classList.remove(COMPLETED_ENTRY_CLASS);
+        entry.element.querySelector(`.${COMPLETED_BADGE_CLASS}`)?.remove();
+        continue;
+      }
+
+      entry.element.classList.add(COMPLETED_ENTRY_CLASS);
+      if (entry.element.querySelector(`.${COMPLETED_BADGE_CLASS}`)) continue;
+      const badge = document.createElement('div');
+      badge.className = COMPLETED_BADGE_CLASS;
+      const toothLabel = realizedTeeth.length === 1 ? 'Pieza' : 'Piezas';
+      badge.textContent = `✓ Realizado · ${toothLabel} ${formatTeeth(realizedTeeth)} · ${entry.category}`;
+      entry.element.prepend(badge);
+    }
+  }
+
+  function clearCompletedHighlights() {
+    for (const entry of document.querySelectorAll(`.${COMPLETED_ENTRY_CLASS}`)) {
+      entry.classList.remove(COMPLETED_ENTRY_CLASS);
+      entry.querySelector(`.${COMPLETED_BADGE_CLASS}`)?.remove();
+    }
+  }
+
+  function restoreCompactedEntries() {
+    for (const entry of document.querySelectorAll(`.${COLLAPSED_ENTRY_CLASS}`)) {
+      entry.classList.remove(COLLAPSED_ENTRY_CLASS);
+      entry.removeAttribute('aria-hidden');
+    }
+    document.querySelectorAll(`.${GROUP_SUMMARY_CLASS}`).forEach((summary) => summary.remove());
+    document.querySelectorAll('[data-sj-periodontal-compacted="true"]')
+      .forEach((container) => delete container.dataset.sjPeriodontalCompacted);
+  }
+
+  function findEvolutionHeading() {
+    return [...document.querySelectorAll('main h1, main h2, main h3')]
+      .find((heading) => heading.textContent.trim() === 'Evoluciones');
+  }
+
+  function getSourceText(main) {
+    const card = document.getElementById(CARD_ID);
+    const fullText = main.innerText;
+    if (!card) return fullText;
+    return fullText.replace(card.innerText, '');
+  }
+
+  function detectRouteChange() {
+    if (location.pathname === lastPath) return false;
+
+    lastPath = location.pathname;
+    sourceBeforeNavigation = lastSourceText;
+    awaitingNewPatientContent = true;
+    lastSignature = '';
+    lastAttemptedPath = '';
+    document.getElementById(CARD_ID)?.remove();
+    restoreCompactedEntries();
+    clearCompletedHighlights();
+
+    setTimeout(scheduleRender, 250);
+    setTimeout(scheduleRender, 700);
+    setTimeout(scheduleRender, 1400);
+    return true;
+  }
+
+  function render() {
+    if (detectRouteChange()) return;
+
+    if (!PAGE_PATTERN.test(location.pathname)) {
+      document.getElementById(CARD_ID)?.remove();
+      restoreCompactedEntries();
+      clearCompletedHighlights();
+      lastSignature = '';
+      lastSourceText = '';
+      return;
+    }
+
+    const main = document.querySelector('main');
+    const heading = findEvolutionHeading();
+    if (!main || !heading) return;
+
+    const sourceText = getSourceText(main);
+    if (awaitingNewPatientContent) {
+      if (!sourceText.trim() || sourceText === sourceBeforeNavigation) return;
+      awaitingNewPatientContent = false;
+    }
+    lastSourceText = sourceText;
+    lastAttemptedPath = location.pathname;
+
+    const professionalText = onlyProfessionalEntries(sourceText);
+    const summary = calculateSummary(professionalText);
+    addStyles();
+    compactDuplicateEntries(main);
+    if (!summary) {
+      clearCompletedHighlights();
+      document.getElementById(CARD_ID)?.remove();
+      lastSignature = '';
+      return;
+    }
+    highlightCompletedEntries(main, summary);
+
+    const signature = JSON.stringify(summary);
+    const currentCard = document.getElementById(CARD_ID);
+    if (currentCard && signature === lastSignature) return;
+
+    const nextCard = buildCard(summary);
+    currentCard?.remove();
+    const controlsHeader = heading.parentElement;
+    if (!controlsHeader?.parentElement) return;
+    controlsHeader.insertAdjacentElement('afterend', nextCard);
+    lastSignature = signature;
+  }
+
+  function scheduleRender() {
+    if (renderTimer) return;
+    renderTimer = setTimeout(() => {
+      renderTimer = undefined;
+      render();
+    }, 100);
+  }
+
+  function ensureObserver() {
+    const root = document.documentElement;
+    if (!root) return false;
+    root.dataset.sjPeriodontalScript = SCRIPT_VERSION;
+    if (root === observedRoot) return false;
+
+    observer?.disconnect();
+    observer = new MutationObserver(scheduleRender);
+    observer.observe(root, { childList: true, subtree: true });
+    observedRoot = root;
+    lastAttemptedPath = '';
+    return true;
+  }
+
+  function boot() {
+    ensureObserver();
+    scheduleRender();
+  }
+
+  window.addEventListener('popstate', scheduleRender);
+  window.addEventListener('pageshow', boot);
+  window.addEventListener('DOMContentLoaded', boot);
+  window.addEventListener('load', boot);
+  setInterval(() => {
+    const rootChanged = ensureObserver();
+    const routeChanged = detectRouteChange();
+    const needsFirstAttempt = PAGE_PATTERN.test(location.pathname)
+      && !document.getElementById(CARD_ID)
+      && lastAttemptedPath !== location.pathname;
+
+    if (rootChanged || routeChanged || needsFirstAttempt) scheduleRender();
+  }, 500);
+  boot();
+})();
