@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Registro diario a Google Sheets
 // @namespace    https://odontofamily.local/dentalink-registro-diario-sheets
-// @version      1.3.0
+// @version      1.4.0
 // @description  Copia una fila del plan de tratamiento de Dentalink para pegarla en el registro diario de Google Sheets.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -33,6 +33,7 @@
   const TARGET_DENTALINK = /\/pacientes\/\d+\/tratamiento\/\d+\b/i;
   const TARGET_TREATMENTS = /\/pacientes\/\d+\/tratamientos\b/i;
   const TARGET_SHEETS = /^https:\/\/docs\.google\.com\/spreadsheets\/d\//i;
+  let sendInFlight = false;
   const PLAN_TITLE_RE = /^(?:\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2})\s+\S.+/;
   const MONTHS = {
     enero: 1,
@@ -259,10 +260,7 @@
       payload.paciente,
       payload.planId,
       payload.tituloPlan,
-      payload.valor,
-      "",
-      "",
-      ""
+      payload.valor
     ].map((value) => String(value || "").replace(/\t/g, " ").replace(/\n/g, " ")).join("\t");
   }
 
@@ -354,13 +352,15 @@
     }
 
     return new Promise((resolve, reject) => {
-      const params = new URLSearchParams({
+      const body = {
         token: config.token,
-        record: JSON.stringify(payloadToSheetRecord(payload))
-      });
+        record: payloadToSheetRecord(payload)
+      };
       GM_xmlhttpRequest({
-        method: "GET",
-        url: `${config.webAppUrl}?${params.toString()}`,
+        method: "POST",
+        url: config.webAppUrl,
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify(body),
         timeout: 20000,
         onload: (response) => {
           let body = null;
@@ -531,6 +531,7 @@
       `${payload.fecha || "-"} · ${payload.hora || "--:--"}`
     );
     const sendButton = button("Enviar", "send");
+    sendButton.disabled = sendInFlight;
     const copyButton = button("Copiar", "copy", "secondary");
     const refreshButton = button("Refrescar", "refresh", "secondary");
     const statusEl = document.createElement("div");
@@ -553,6 +554,9 @@
         return;
       }
       if (action === "send") {
+        if (sendInFlight) return;
+        sendInFlight = true;
+        sendButton.disabled = true;
         savePayload(payload);
         setStatus(panel, "Enviando a Sheets...", "warn");
         postToSheets(payload)
@@ -561,7 +565,8 @@
             const suffix = result.duplicate ? `Ya existia en ${location}.` : `Agregada en ${location}.`;
             setStatus(panel, suffix, result.duplicate ? "warn" : "ok");
           })
-          .catch((error) => setStatus(panel, error.message, "err"));
+          .catch((error) => setStatus(panel, error.message, "err"))
+          .finally(() => { sendInFlight = false; sendButton.disabled = false; });
         return;
       }
       savePayload(payload);

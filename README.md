@@ -77,6 +77,16 @@ El script **Registro diario a Google Sheets** puede enviar la fila directamente 
    - Quién tiene acceso: **Cualquier usuario con el enlace**
 5. La URL del Web App ya viene incluida en el userscript.
 
+### Formato mensual automático
+
+La aplicación web crea el mes al recibir su primer registro y aplica encabezados, filtros, formato de fechas y moneda, total diario y resumen mensual. Desde 2027 incluye el año en el nombre para evitar mezclar periodos. El menú **Registro diario** permite preparar el mes actual o uniformar las hojas existentes que tengan las seis columnas compatibles; las estructuras históricas distintas se conservan.
+
+El resumen muestra valor registrado por plan, registros, días con registros, promedio, duplicados y proyección orientativa. El valor proviene del presupuesto del plan y no acredita pagos recibidos. **Jornadas restantes** conserva la previsión existente o permite escribir un número.
+
+Para actualizar una instalación existente, guarda el código y ve a **Implementar → Gestionar implementaciones → Editar → Versión nueva → Implementar**, conservando la URL actual.
+
+Los envíos se serializan y comprueban antes de responder. En Tampermonkey 1.4.0 el envío usa POST, el botón bloquea clics simultáneos y **Copiar** pega solamente las seis columnas de datos para conservar los cálculos vecinos.
+
 ### Tampermonkey
 
 1. Abre el menú de Tampermonkey del script.
