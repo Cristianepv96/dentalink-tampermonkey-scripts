@@ -90,6 +90,34 @@ El script **Registro diario a Google Sheets** puede enviar la fila directamente 
 
 ### Evoluciones periodoncia
 
+Pase el cursor sobre un círculo para iluminar todos los pendientes de su mismo
+procedimiento **antes de hacer clic y abrir la primera prestación**. También
+funciona al enfocar el círculo con el teclado, si Dentalink permite enfocarlo.
+Al abrirlo, se excluye su fila del halo como prestación principal. No hay selector
+ni cuadro sobre la lista de tratamientos; se conserva un indicador de progreso
+con el botón **Detener automatización** cuando se abre la primera prestación.
+La selección se reinicia al cambiar de página.
+
+Desde la versión **3.2.0**, al abrir manualmente un círculo se fija el grupo de
+prestaciones pendientes de ese procedimiento exacto. Revise y redacte la nota
+principal como siempre. Al pulsar el botón nativo **Evolucionar (100%)**, el script
+espera a que cierre el editor y esa prestación figure al 100% durante al menos
+600 ms. Luego abre y guarda las restantes del grupo, **sin texto**, una por una,
+esperando esa misma señal después de cada guardado. No se inicia por pulsar
+**Insertar** en el formulario de textos rápidos ni al cerrar el editor.
+
+El panel muestra cuántas restantes se guardarán y permite **Detener automatización**.
+Se detiene ante contenido o campos adicionales ya rellenados, filas duplicadas,
+cambios del grupo/paciente/plan, interacción manual durante la ejecución o un
+guardado no confirmado en 15 segundos. No borra contenido, reintenta guardados
+ni reanuda operaciones después de recargar. Detenerlo no revierte un guardado
+ya enviado; revise la última prestación antes de continuar manualmente.
+
+La señal de realización se lee del atributo nativo `porcentaje_completacion`;
+se comprobó la estructura del editor y sus controles en Dentalink sin guardar
+prestaciones. Las pruebas simulan el flujo y sus fallos: no certifican la
+persistencia del servidor ni sustituyen la verificación de los registros reales.
+
 El script de evoluciones tiene un objeto `CONFIG` al inicio del archivo donde puedes personalizar:
 
 ```javascript

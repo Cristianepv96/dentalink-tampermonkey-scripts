@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.1.1
+// @version      3.2.1
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -125,6 +125,352 @@
   let pendingTreatmentSelection = null;
   let lastAnamnesisSignature = "";
   const memoryGroupedTreatmentRecords = {};
+  const PREVIEW_ID = "dlk-evo-circle-preview";
+  const PREVIEW_CLASS = "dlk-evo-circle-candidate";
+  let previewHref = "";
+  let previewGroup = "";
+  let previewPrincipal = "";
+  let completionJob = null;
+  const COMPLETION_STATUS_ID = "dlk-evo-completion-status";
+
+  function completionRows() {
+    return [...new Set([...document.querySelectorAll(".row-nombre")]
+      .map(treatmentRowFromElement).filter(Boolean))];
+  }
+
+  function readCompletionItem(key) {
+    const rows = completionRows().filter((row) => previewRowKey(treatmentItemFromRow(row)) === key);
+    if (rows.length !== 1) return null;
+    const row = rows[0];
+    const container = row.closest("[porcentaje_completacion]");
+    const percent = container?.getAttribute("porcentaje_completacion");
+    const circles = [...row.querySelectorAll(".no-realizada")].filter(isVisible);
+    return { row, circle: circles.length === 1 ? circles[0] : null,
+      state: percent === "100" ? "completed" : percent === "0" && circles.length === 1 ? "pending" : "unknown" };
+  }
+
+  function nativeEvolution() {
+    const modal = document.getElementById("modalEvolution");
+    if (!modal || !isVisible(modal)) return null;
+    const editors = [...modal.querySelectorAll(".tiptap.ProseMirror[contenteditable='true']")].filter(isVisible);
+    const button = modal.querySelector("#button-evolucionar-100");
+    if (editors.length !== 1 || !button || !isVisible(button)
+      || normalizePlanText(button.textContent) !== "Evolucionar (100%)") return null;
+    return { modal, editor: editors[0], button };
+  }
+
+  function editorIsEmpty(native) {
+    return !normalizePlanText(native.editor.textContent).replace(/[\u200B-\u200D\uFEFF]/g, "")
+      && !native.editor.querySelector("img,svg,video,audio,iframe,table,hr,[data-type],[contenteditable='false']")
+      && !native.modal.querySelector("a[href],img,video,audio,iframe")
+      && ![...native.modal.querySelectorAll("input,textarea")].some((input) =>
+        input.type === "file" ? input.files?.length : !input.disabled && normalizePlanText(input.value));
+  }
+
+  function showCompletionStatus(message, job = completionJob) {
+    let panel = document.getElementById(COMPLETION_STATUS_ID);
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = COMPLETION_STATUS_ID;
+      panel.style.cssText = "position:fixed;bottom:18px;left:18px;z-index:2147483647;max-width:440px;padding:12px 16px;border:1px solid #8ebbc5;border-radius:8px;background:#f5fafb;color:#25434b;box-shadow:0 3px 14px #0002;font:13px/1.5 sans-serif";
+      const text = document.createElement("div");
+      text.setAttribute("role", "status");
+      const stop = document.createElement("button");
+      stop.type = "button";
+      stop.textContent = "Detener automatización";
+      stop.addEventListener("click", () => cancelCompletion("Detenido por el usuario."));
+      panel.append(text, stop);
+      document.body.appendChild(panel);
+    }
+    const text = panel.querySelector("[role='status']");
+    if (text.textContent !== message) text.textContent = message;
+    panel.querySelector("button").hidden = !job || job.cancelled || job.phase === "done" || job.phase === "stopped";
+  }
+
+  function cancelCompletion(reason) {
+    if (!completionJob || ["done", "stopped"].includes(completionJob.phase)) return;
+    completionJob.cancelled = true;
+    completionJob.phase = "stopped";
+    pendingTreatmentSelection = null;
+    showCompletionStatus(`${reason} No se iniciarán más guardados. Si había uno en curso, revise su estado en Dentalink.`);
+  }
+
+  function armCompletion(circle) {
+    if (completionJob?.phase === "running") return;
+    if (completionJob) completionJob.cancelled = true;
+    completionJob = null;
+    document.getElementById(COMPLETION_STATUS_ID)?.remove();
+    if (!currentTreatmentPlanId() || nativeEvolution()) return;
+    const row = treatmentRowFromElement(circle);
+    const item = treatmentItemFromRow(row);
+    const groupKey = previewGroupKey(item);
+    const group = collectPreviewGroups().get(groupKey);
+    if (!group || group.ambiguous || !group.entries.some((entry) => entry.circle === circle)) return;
+    const allKeys = completionRows().filter((candidate) => previewGroupKey(treatmentItemFromRow(candidate)) === groupKey)
+      .map((candidate) => previewRowKey(treatmentItemFromRow(candidate))).sort();
+    if (new Set(allKeys).size !== allKeys.length) {
+      showCompletionStatus("Automatización no iniciada: hay prestaciones duplicadas que no se distinguen de forma única.", null);
+      return;
+    }
+    const principal = previewRowKey(item);
+    const keys = group.entries.map((entry) => previewRowKey(entry.item));
+    if (keys.some((key) => readCompletionItem(key)?.state !== "pending")) return;
+    completionJob = { scope: location.href, groupKey, allKeys, principal,
+      remaining: keys.filter((key) => key !== principal), completed: [], cancelled: false,
+      phase: "opening-principal", armedAt: Date.now(), native: null };
+    showCompletionStatus(`Al guardar la nota principal con «Evolucionar (100%)», se guardarán ${completionJob.remaining.length} prestaciones restantes sin texto. Puede detener la automatización aquí.`);
+  }
+
+  function groupIsUnchanged(job) {
+    const keys = completionRows().filter((row) => previewGroupKey(treatmentItemFromRow(row)) === job.groupKey)
+      .map((row) => previewRowKey(treatmentItemFromRow(row))).sort();
+    return JSON.stringify(keys) === JSON.stringify(job.allKeys);
+  }
+
+  function completionGuard(job) {
+    if (job.cancelled || location.href !== job.scope || !groupIsUnchanged(job)) {
+      throw new Error("Cambió el contexto o las prestaciones del grupo, o se canceló la ejecución.");
+    }
+  }
+
+  async function waitForCompletionCondition(check, guard, message, timeout = 15000) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      guard();
+      const result = check();
+      if (result) return result;
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+    guard();
+    throw new Error(message);
+  }
+
+  async function waitForSavedRow(job, key, guard) {
+    // Se exige cierre del modal y 100% estable; la desaparición del modal sola
+    // también ocurre al cancelar y nunca constituye evidencia de guardado.
+    let stableSince = 0;
+    return waitForCompletionCondition(() => {
+      if (nativeEvolution() || document.getElementById("modalEvolution") || readCompletionItem(key)?.state !== "completed") {
+        stableSince = 0;
+        return false;
+      }
+      if (!stableSince) stableSince = Date.now();
+      return Date.now() - stableSince >= 600;
+    }, guard, "Dentalink no confirmó el cierre del editor y la prestación al 100%. No se repetirá el guardado.");
+  }
+
+  function completionDriver(job) {
+    return {
+      scope: () => { completionGuard(job); return location.href; },
+      read: readCompletionItem,
+      progress: (count, total, key) => showCompletionStatus(`Guardando ${count + 1} de ${total} restantes · ${JSON.parse(key)[1] || "procedimiento"}.`),
+      open: (key) => {
+        completionGuard(job);
+        if (document.getElementById("modalEvolution") || document.getElementById(MODAL_ID)) throw new Error("Hay otro editor o formulario abierto.");
+        const item = readCompletionItem(key);
+        if (!item?.circle || item.state !== "pending") throw new Error("La prestación ya no está pendiente.");
+        job.current = key;
+        pendingTreatmentSelection = null;
+        item.circle.click();
+      },
+      awaitEditor: (key, guard) => waitForCompletionCondition(() => nativeEvolution(), () => { guard(); completionGuard(job); }, "No se abrió el editor de la prestación."),
+      empty: editorIsEmpty,
+      matches: (native, key) => nativeEvolution()?.editor === native.editor && job.current === key,
+      save: (native, key) => {
+        completionGuard(job);
+        if (job.current !== key || nativeEvolution()?.editor !== native.editor || !editorIsEmpty(native)
+          || native.button.disabled || native.button.getAttribute("aria-disabled") === "true") throw new Error("El editor cambió, contiene datos o no permite evolucionar.");
+        native.button.click();
+      },
+      awaitSaved: (key, guard) => waitForSavedRow(job, key, () => { guard(); completionGuard(job); }),
+      done: (count) => { job.phase = "done"; showCompletionStatus(`Finalizado: ${count} prestaciones restantes confirmadas al 100% en Dentalink, sin texto.`); },
+      stopped: (message, count, total) => {
+        job.phase = "stopped";
+        job.cancelled = true;
+        if (completionJob === job) showCompletionStatus(`Detenido: ${message} Confirmadas: ${count} de ${total}. Revise la última prestación antes de continuar manualmente.`);
+      }
+    };
+  }
+
+  function observePrincipalEditor() {
+    const job = completionJob;
+    if (!job || job.cancelled || ["running", "done", "stopped", "waiting-save"].includes(job.phase)) return;
+    try { completionGuard(job); } catch (error) { cancelCompletion(error.message); return; }
+    const native = nativeEvolution();
+    if (job.phase === "opening-principal") {
+      if (native) { job.native = native; job.phase = "principal-ready"; }
+      else if (Date.now() - job.armedAt > 15000) cancelCompletion("No se abrió la evolución principal.");
+    } else if (!native || native.editor !== job.native.editor) {
+      cancelCompletion("Se cerró o cambió la evolución principal sin iniciar su guardado.");
+    }
+  }
+
+  function handleCompletionClick(event) {
+    if (!event.isTrusted || !(event.target instanceof Element)) return;
+    const circle = event.target.closest(".no-realizada");
+    if (circle) {
+      if (completionJob?.phase === "running") { cancelCompletion("Se seleccionó otra prestación."); return; }
+      armCompletion(circle);
+      return;
+    }
+    const job = completionJob;
+    if (!job || job.cancelled || job.phase === "running") return;
+    if (event.target.closest("#button-Cerrar")) { cancelCompletion("Se cerró la evolución principal."); return; }
+    if (!event.target.closest("#button-evolucionar-100")) return;
+    observePrincipalEditor();
+    const native = nativeEvolution();
+    if (job.phase !== "principal-ready" || native?.editor !== job.native.editor
+      || native.button.disabled || native.button.getAttribute("aria-disabled") === "true"
+      || !normalizePlanText(native.editor.textContent)) {
+      cancelCompletion("La nota principal no está lista o está vacía.");
+      return;
+    }
+    job.phase = "waiting-save";
+    showCompletionStatus("Esperando que Dentalink confirme el guardado de la nota principal…");
+    waitForSavedRow(job, job.principal, () => completionGuard(job)).then(() => {
+      completionGuard(job);
+      job.phase = "running";
+      return completeEmptyTreatmentGroup(job, completionDriver(job));
+    }).catch((error) => {
+      job.cancelled = true;
+      job.phase = "stopped";
+      if (completionJob === job) showCompletionStatus(`Detenido: ${error.message} No se guardaron automáticamente las restantes.`);
+    });
+  }
+
+  // El controlador DOM aporta la evidencia de apertura y guardado. El motor
+  // vuelve a validar el contexto después de cada espera y antes de cada efecto.
+  async function completeEmptyTreatmentGroup(job, driver) {
+    const guard = () => {
+      if (job.cancelled || driver.scope() !== job.scope) {
+        throw new Error("Proceso detenido: cambió el paciente o plan, o se canceló.");
+      }
+    };
+    const requirePending = (key) => {
+      guard();
+      const item = driver.read(key);
+      if (!item || item.state !== "pending") {
+        throw new Error("Proceso detenido: una prestación cambió o no se identifica de forma única.");
+      }
+      return item;
+    };
+    try {
+      guard();
+      if (driver.read(job.principal)?.state !== "completed") {
+        throw new Error("No se confirmó el guardado de la evolución principal.");
+      }
+      for (const key of job.remaining) {
+        requirePending(key);
+        driver.progress(job.completed.length, job.remaining.length, key);
+        driver.open(key);
+        const editor = await driver.awaitEditor(key, guard);
+        requirePending(key);
+        if (!driver.empty(editor)) throw new Error("Proceso detenido: el editor contiene texto o contenido existente.");
+        if (!driver.matches(editor, key)) throw new Error("Proceso detenido: el editor no corresponde a la prestación seleccionada.");
+        // No insertar, limpiar ni sustituir contenido del editor.
+        guard();
+        driver.save(editor, key);
+        await driver.awaitSaved(key, guard);
+        guard();
+        if (driver.read(key)?.state !== "completed") throw new Error("No se confirmó el guardado de la prestación.");
+        job.completed.push(key);
+      }
+      driver.done(job.completed.length);
+    } catch (error) {
+      driver.stopped(error.message, job.completed.length, job.remaining.length);
+    }
+  }
+
+  // El resaltado no abre editores; el motor solo actúa tras el guardado principal.
+  function previewGroupKey(item) {
+    return JSON.stringify([item.category, item.cups, normalizePlanText(item.procedure).toUpperCase()]);
+  }
+
+  function previewRowKey(item) {
+    return JSON.stringify([previewGroupKey(item), item.tooth]);
+  }
+
+  function collectPreviewGroups() {
+    const groups = new Map();
+    const rows = new Set([...document.querySelectorAll(".row-nombre")]
+      .map((cell) => treatmentRowFromElement(cell)).filter(Boolean));
+    for (const row of rows) {
+      if (!isVisible(row)) continue;
+      const item = treatmentItemFromRow(row);
+      const treatment = periodontalTreatmentByKey(item.category);
+      if (!treatment || (treatment.scope === "tooth" && !item.tooth)) continue;
+      const key = previewGroupKey(item);
+      if (!groups.has(key)) groups.set(key, { ...item, entries: [], ambiguous: 0 });
+      const group = groups.get(key);
+      const circles = [...row.querySelectorAll(".no-realizada")]
+        .filter((circle) => isVisible(circle));
+      // No adivinar qué control corresponde cuando una fila tiene varios.
+      if (circles.length > 1) { group.ambiguous += 1; continue; }
+      if (circles.length === 1) group.entries.push({ item, circle: circles[0] });
+    }
+    return groups;
+  }
+
+  function clearPreviewHighlights() {
+    document.querySelectorAll(`.${PREVIEW_CLASS}`).forEach((circle) =>
+      circle.classList.remove(PREVIEW_CLASS));
+  }
+
+  function previewTreatmentBeforeOpening(event) {
+    if (completionJob && !completionJob.cancelled && !["done", "stopped"].includes(completionJob.phase)) return;
+    if (!currentTreatmentPlanId()) return;
+    const circle = event.target instanceof Element
+      ? event.target.closest(".no-realizada")
+      : null;
+    if (!circle || (event.relatedTarget instanceof Element && circle.contains(event.relatedTarget))) return;
+    const row = treatmentRowFromElement(circle);
+    if (!row || !isVisible(row)) return;
+    const item = treatmentItemFromRow(row);
+    const group = collectPreviewGroups().get(previewGroupKey(item));
+    // Solo previsualizar controles que el reconocimiento pudo asociar sin ambigüedad.
+    if (!group?.entries.some((entry) => entry.circle === circle)) return;
+    if (previewHref === location.href && previewPrincipal === previewRowKey(item)) return;
+    previewHref = location.href;
+    previewGroup = previewGroupKey(item);
+    previewPrincipal = "";
+    ensureCirclePreview();
+  }
+
+  function ensureCirclePreview() {
+    if (previewHref !== location.href) {
+      previewHref = location.href;
+      previewGroup = "";
+      previewPrincipal = "";
+    }
+    const groups = currentTreatmentPlanId() ? collectPreviewGroups() : new Map();
+    if (!groups.size) {
+      clearPreviewHighlights();
+      document.getElementById(PREVIEW_ID)?.remove();
+      return;
+    }
+    if (!document.getElementById(`${PREVIEW_ID}-style`)) {
+      const style = document.createElement("style");
+      style.id = `${PREVIEW_ID}-style`;
+      style.textContent = `
+        .${PREVIEW_CLASS} { outline: 2px solid rgba(38, 145, 173, .55) !important;
+          outline-offset: 3px; box-shadow: 0 0 0 6px rgba(38, 145, 173, .12) !important; }
+      `;
+      document.head.appendChild(style);
+    }
+    document.getElementById(PREVIEW_ID)?.remove();
+    if (!groups.has(previewGroup)) { previewGroup = ""; previewPrincipal = ""; }
+    const group = groups.get(previewGroup);
+    const candidates = (group?.entries || []).filter(({ item }) =>
+      previewRowKey(item) !== previewPrincipal);
+    const wanted = new Set(candidates.map(({ circle }) => circle));
+    document.querySelectorAll(`.${PREVIEW_CLASS}`).forEach((circle) => {
+      if (!wanted.has(circle)) circle.classList.remove(PREVIEW_CLASS);
+    });
+    wanted.forEach((circle) => {
+      if (!circle.classList.contains(PREVIEW_CLASS)) circle.classList.add(PREVIEW_CLASS);
+    });
+
+  }
 
   // ─── Helpers ───
 
@@ -243,6 +589,15 @@
 
     const row = treatmentRowFromElement(target);
     const item = treatmentItemFromRow(row);
+    if (item.category) {
+      previewHref = location.href;
+      previewGroup = previewGroupKey(item);
+      previewPrincipal = previewRowKey(item);
+    } else {
+      previewGroup = "";
+      previewPrincipal = "";
+    }
+    ensureCirclePreview();
     if (!item.category) return;
     const context = getOpenTreatmentContext(item.category);
 
@@ -1338,6 +1693,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   // ═══════════════════════════════════════════════════════════════════════
 
   function openPromptForRememberedTreatment() {
+    if (completionJob?.phase === "running") { pendingTreatmentSelection = null; return; }
     if (document.getElementById(MODAL_ID)) return;
     const selection = consumeTreatmentSelection();
     if (!shouldOpenGroupedTreatmentPrompt(selection)) return;
@@ -1495,6 +1851,8 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   }
 
   function syncPage() {
+    observePrincipalEditor();
+    ensureCirclePreview();
     scheduleAnamnesisCapture();
     schedulePanel();
   }
@@ -1503,10 +1861,21 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   // ═══════════════════════════════════════════════════════════════════════
 
   document.addEventListener("pointerdown", rememberTreatmentSelection, true);
+  document.addEventListener("click", handleCompletionClick, true);
+  ["pointerdown", "keydown", "input", "change", "paste"].forEach((type) => {
+    document.addEventListener(type, (event) => {
+      if (event.isTrusted && ["running", "waiting-save"].includes(completionJob?.phase)) {
+        cancelCompletion("Hubo una interacción manual durante la ejecución.");
+      }
+    }, true);
+  });
+  document.addEventListener("pointerover", previewTreatmentBeforeOpening, true);
+  document.addEventListener("focusin", previewTreatmentBeforeOpening, true);
   document.addEventListener("input", scheduleAnamnesisCapture, true);
   document.addEventListener("change", scheduleAnamnesisCapture, true);
   watchPage(syncPage, {
     delay: 150,
-    isStale: () => isTargetPage() && getEditor() && !document.getElementById(PANEL_ID)
+    isStale: () => (completionJob && !["done", "stopped", "running", "waiting-save"].includes(completionJob.phase))
+      || (isTargetPage() && getEditor() && !document.getElementById(PANEL_ID))
   });
 })();
