@@ -89,12 +89,12 @@ test("cancelar durante un guardado impide abrir la siguiente prestación", async
   assert.equal(f.events.length, 3);
 });
 
-function domFixture({ percent = "0", modalOpen = false, text = "", media = false, field = "" } = {}) {
+function domFixture({ percent = "0", modalOpen = false, modalMounted = false, text = "", media = false, field = "" } = {}) {
   let clock = 0;
   const notices = [];
   const started = [];
   const cell = { textContent: "[242201] CURETAJE A CAMPO ABIERTO( CADA DIENTE)" };
-  const circle = {};
+  const circle = { click() { notices.push("circle-opened"); } };
   const row = {
     parentElement: {},
     querySelector: selector => selector.includes("row-nombre") ? cell : { textContent: "1.7" },
@@ -111,10 +111,10 @@ function domFixture({ percent = "0", modalOpen = false, text = "", media = false
   const document = {
     body: row.parentElement, addEventListener() {},
     querySelectorAll: () => [cell],
-    getElementById: id => id === "modalEvolution" && modalOpen ? modal : null
+    getElementById: id => id === "modalEvolution" && (modalOpen || modalMounted) ? modal : null
   };
   const source = fs.readFileSync(path.join(__dirname, "..", "Dentalink - Evoluciones periodoncia.user.js"), "utf8")
-    .replace(/\n\}\)\(\);\s*$/, "\n showCompletionStatus = message => notices.push(message); completeEmptyTreatmentGroup = async job => started.push(job); globalThis.domTest = { readCompletionItem, nativeEvolution, editorIsEmpty, waitForSavedRow, previewRowKey, handleCompletionClick, observePrincipalEditor, setJob: job => completionJob = job };\n})();");
+    .replace(/\n\}\)\(\);\s*$/, "\n showCompletionStatus = message => notices.push(message); completeEmptyTreatmentGroup = async job => started.push(job); globalThis.domTest = { readCompletionItem, nativeEvolution, editorIsEmpty, waitForSavedRow, completionDriver, previewRowKey, handleCompletionClick, observePrincipalEditor, setJob: job => completionJob = job };\n})();");
   class Element {
     constructor(selector) { this.selector = selector; }
     closest(selector) { return selector === this.selector ? this : null; }
@@ -122,7 +122,7 @@ function domFixture({ percent = "0", modalOpen = false, text = "", media = false
   const context = {
     Date: { now: () => clock }, document, notices, started, Element,
     location: { href: "https://demo.dentalink.cl/pacientes/1/tratamiento/2" },
-    window: { __dlkUtils: { watchPage() {}, isVisible: () => true }, setTimeout: callback => { clock += 120; callback(); } }
+    window: { __dlkUtils: { watchPage() {}, isVisible: element => element === modal ? modalOpen : true }, setTimeout: callback => { clock += 120; callback(); } }
   };
   vm.createContext(context);
   vm.runInContext(source, context);
@@ -197,4 +197,64 @@ test("Cerrar o guardar una principal vacía no inicia el grupo", () => {
     assert.equal(job.cancelled, true);
     assert.equal(f.started.length, 0);
   }
+});
+
+
+test("confirma el 100% cuando Dentalink conserva el modal oculto en el DOM", async () => {
+  const f = domFixture({ percent: "100", modalOpen: false, modalMounted: true });
+  assert.equal(f.api.nativeEvolution(), null);
+  assert.equal(await f.api.waitForSavedRow({}, f.key, () => {}), true);
+});
+
+test("un modal oculto sin 100% nunca confirma el guardado", async () => {
+  const f = domFixture({ percent: "0", modalOpen: false, modalMounted: true });
+  await assert.rejects(f.api.waitForSavedRow({}, f.key, () => {}), /no confirmó/);
+});
+
+test("el cierre por ocultación inicia el grupo una sola vez después del guardado principal", async () => {
+  const f = domFixture({ modalOpen: true, modalMounted: true, text: "Nota principal" });
+  const job = f.makeJob();
+  f.api.setJob(job);
+  f.api.handleCompletionClick(f.event("#button-evolucionar-100"));
+  assert.equal(job.phase, "waiting-save");
+  f.saved();
+  for (let i = 0; i < 15; i++) await Promise.resolve();
+  assert.equal(f.started.length, 1);
+});
+
+
+test("abre la siguiente pendiente aunque exista un modal anterior oculto", () => {
+  const f = domFixture({ modalMounted: true, modalOpen: false });
+  const job = f.makeJob();
+  f.api.setJob(job);
+  f.api.completionDriver(job).open(f.key);
+  assert.deepEqual(f.notices, ["circle-opened"]);
+});
+
+test("un modal visible sigue impidiendo abrir otra prestación", () => {
+  const f = domFixture({ modalMounted: true, modalOpen: true });
+  const job = f.makeJob();
+  assert.throws(() => f.api.completionDriver(job).open(f.key), /otro editor/);
+  assert.equal(f.notices.length, 0);
+});
+
+test("un segundo clic en guardar no cancela ni inicia otra espera", async () => {
+  const f = domFixture({ modalOpen: true, text: "Nota principal" });
+  const job = f.makeJob();
+  f.api.setJob(job);
+  f.api.handleCompletionClick(f.event("#button-evolucionar-100"));
+  f.api.handleCompletionClick(f.event("#button-evolucionar-100"));
+  assert.equal(job.phase, "waiting-save");
+  assert.equal(job.cancelled, false);
+  f.saved();
+  for (let i = 0; i < 15; i++) await Promise.resolve();
+  assert.equal(f.started.length, 1);
+});
+
+
+test("el aviso distingue un 100% con ventana abierta de una prestación pendiente", async () => {
+  const open = domFixture({ percent: "100", modalOpen: true });
+  await assert.rejects(open.api.waitForSavedRow({}, open.key, () => {}), /prestación al 100%; ventana todavía abierta/);
+  const pending = domFixture({ percent: "0", modalMounted: true });
+  await assert.rejects(pending.api.waitForSavedRow({}, pending.key, () => {}), /prestación aún pendiente; ventana cerrada/);
 });

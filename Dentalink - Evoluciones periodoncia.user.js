@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.2.1
+// @version      3.2.2
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -149,9 +149,14 @@
       state: percent === "100" ? "completed" : percent === "0" && circles.length === 1 ? "pending" : "unknown" };
   }
 
+  function visibleDialog(id) {
+    const dialog = document.getElementById(id);
+    return dialog && isVisible(dialog) ? dialog : null;
+  }
+
   function nativeEvolution() {
-    const modal = document.getElementById("modalEvolution");
-    if (!modal || !isVisible(modal)) return null;
+    const modal = visibleDialog("modalEvolution");
+    if (!modal) return null;
     const editors = [...modal.querySelectorAll(".tiptap.ProseMirror[contenteditable='true']")].filter(isVisible);
     const button = modal.querySelector("#button-evolucionar-100");
     if (editors.length !== 1 || !button || !isVisible(button)
@@ -214,11 +219,12 @@
     }
     const principal = previewRowKey(item);
     const keys = group.entries.map((entry) => previewRowKey(entry.item));
+    if (keys.length < 2) return;
     if (keys.some((key) => readCompletionItem(key)?.state !== "pending")) return;
     completionJob = { scope: location.href, groupKey, allKeys, principal,
       remaining: keys.filter((key) => key !== principal), completed: [], cancelled: false,
       phase: "opening-principal", armedAt: Date.now(), native: null };
-    showCompletionStatus(`Al guardar la nota principal con «Evolucionar (100%)», se guardarán ${completionJob.remaining.length} prestaciones restantes sin texto. Puede detener la automatización aquí.`);
+    showCompletionStatus(`Automatización v3.2.2 · Al guardar la nota principal con «Evolucionar (100%)», se guardarán ${completionJob.remaining.length} prestaciones restantes sin texto. Puede detener la automatización aquí.`);
   }
 
   function groupIsUnchanged(job) {
@@ -246,17 +252,25 @@
   }
 
   async function waitForSavedRow(job, key, guard) {
-    // Se exige cierre del modal y 100% estable; la desaparición del modal sola
-    // también ocurre al cancelar y nunca constituye evidencia de guardado.
+    // Dentalink puede cerrar ocultando el modal sin retirarlo del DOM. Exigir
+    // ausencia visible y 100% estable; ocultarlo solo nunca demuestra guardado.
     let stableSince = 0;
     return waitForCompletionCondition(() => {
-      if (nativeEvolution() || document.getElementById("modalEvolution") || readCompletionItem(key)?.state !== "completed") {
+      if (visibleDialog("modalEvolution") || readCompletionItem(key)?.state !== "completed") {
         stableSince = 0;
         return false;
       }
       if (!stableSince) stableSince = Date.now();
       return Date.now() - stableSince >= 600;
-    }, guard, "Dentalink no confirmó el cierre del editor y la prestación al 100%. No se repetirá el guardado.");
+    }, guard, "Dentalink no confirmó el cierre del editor y la prestación al 100%. No se repetirá el guardado.").catch((error) => {
+      if (!error.message.startsWith("Dentalink no confirmó")) throw error;
+      const state = readCompletionItem(key)?.state;
+      const stateText = state === "completed" ? "prestación al 100%"
+        : state === "pending" ? "prestación aún pendiente"
+        : "estado de la prestación no identificable";
+      const modalText = visibleDialog("modalEvolution") ? "ventana todavía abierta" : "ventana cerrada";
+      throw new Error(`Dentalink no confirmó el guardado: ${stateText}; ${modalText}. No se repetirá el guardado.`);
+    });
   }
 
   function completionDriver(job) {
@@ -266,7 +280,7 @@
       progress: (count, total, key) => showCompletionStatus(`Guardando ${count + 1} de ${total} restantes · ${JSON.parse(key)[1] || "procedimiento"}.`),
       open: (key) => {
         completionGuard(job);
-        if (document.getElementById("modalEvolution") || document.getElementById(MODAL_ID)) throw new Error("Hay otro editor o formulario abierto.");
+        if (visibleDialog("modalEvolution") || visibleDialog(MODAL_ID)) throw new Error("Hay otro editor o formulario abierto.");
         const item = readCompletionItem(key);
         if (!item?.circle || item.state !== "pending") throw new Error("La prestación ya no está pendiente.");
         job.current = key;
@@ -317,6 +331,7 @@
     if (!job || job.cancelled || job.phase === "running") return;
     if (event.target.closest("#button-Cerrar")) { cancelCompletion("Se cerró la evolución principal."); return; }
     if (!event.target.closest("#button-evolucionar-100")) return;
+    if (job.phase === "waiting-save") return;
     observePrincipalEditor();
     const native = nativeEvolution();
     if (job.phase !== "principal-ready" || native?.editor !== job.native.editor
