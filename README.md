@@ -11,13 +11,15 @@ Scripts de [Tampermonkey](https://www.tampermonkey.net/) para automatizar tareas
 | **Evoluciones periodoncia** | Genera valoraciones y evoluciones clínicas, precarga piezas pendientes y agrega el tratamiento restante o el estado de paciente controlado. Puede incorporar la Ficha Anamnesis. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js) |
 | **Autollenado orden de servicio** | Rellena automáticamente los campos base de la orden y completa los borradores generados desde el periodontograma con CUPS, cantidad, indicaciones y justificación clínica. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js) |
 | **Autollenado certificado de incapacidad** | Completa el certificado de periodoncia, incluida la transcripción, el origen por enfermedad general y el profesional. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20certificado%20de%20incapacidad.user.js) |
-| **Antecedentes por defecto** | Rellena textareas de antecedentes (motivo de consulta, enfermedad actual, antecedentes odontológicos) con textos por defecto cuando están vacíos. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js) |
-| **Botones receta rápida** | Botones para insertar recetas predefinidas (Naproxeno, Amoxicilina, Azitromicina) en el editor de recetas. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js) |
+| **Antecedentes por defecto** | Anamnesis rápida: pone comillas en el motivo y el inicio de la enfermedad actual, agrega el botón **Sin antecedentes** (ASA I / NIEGA en campos vacíos, con Deshacer), botones por enfermedad (HTA, dislipidemia, diabetes, hipotiroidismo) que resaltan sus medicamentos, y casillas de antecedentes odontológicos. No guarda: revise y pulse Guardar. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js) |
+| **Botones receta rápida** | Botones para insertar recetas predefinidas (Naproxeno, Amoxicilina, Azitromicina, Interproximal, Perioaid). No repite un medicamento que ya está en la receta y marca en rojo, con doble clic para confirmar, los botones que chocan con las alertas del paciente (alergias, anticoagulantes, enfermedad renal, embarazo). | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js) |
 | **CUPS rápido** | Panel flotante con códigos CUPS comunes (SAVIA SALUD y FOMAG) para insertar rápidamente en la orden de servicio. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20CUPS%20rapido%20orden%20de%20servicio.user.js) |
 | **Resumen periodontograma** | Genera el resumen clínico y abre órdenes de servicio listas para campo cerrado, campo abierto y drenaje. La movilidad queda como hallazgo, sin solicitar ajuste oclusal automáticamente. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma.user.js) |
 | **Registro diario a Google Sheets** | Envía o copia desde el plan de tratamiento una fila lista para el registro diario: fecha, sede, paciente, ID plan, título y valor. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Registro%20diario%20a%20Google%20Sheets.user.js) |
 
 > **Nota:** También se requiere instalar la dependencia compartida **[dentalink-utils.js](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js)**, pero esta se carga automáticamente vía `@require` al instalar cualquier script.
+>
+> Los textos de los medicamentos (posología de naproxeno, amoxicilina, etc.) están en **[dentalink-medicamentos.js](dentalink-medicamentos.js)** y los usan tanto **Botones receta rápida** como **Evoluciones periodoncia**. Para cambiar una posología, edítela allí una sola vez.
 
 ---
 
@@ -167,6 +169,7 @@ antes de generar una nueva evolución desde otro apartado de Dentalink.
 
 ```
 ├── dentalink-utils.js                              # Utilidades compartidas (@require)
+├── dentalink-medicamentos.js                       # Textos de medicamentos compartidos (@require)
 ├── Dentalink - Evoluciones periodoncia.user.js     # Textos rápidos evoluciones
 ├── Dentalink - Condensación de evoluciones.user.js # Resumen de avances en evoluciones
 ├── Dentalink - Autollenado orden de servicio.user.js

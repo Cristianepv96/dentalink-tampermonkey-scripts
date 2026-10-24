@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.2.2
+// @version      3.2.3
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
 // @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.2
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-medicamentos.js?v=1.0.0
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -76,7 +77,8 @@
       farmaco: "Lidocaina 2% con epinefrina 1:80.000"
     },
     farmacologia: {
-      naproxeno: "Naproxeno 500mg tabletas #9 Tomar 1 tab cada 8 horas por 3 días. En caso de dolor no tolerable o indicación en posología."
+      // La posología viene de dentalink-medicamentos.js (la misma que usa Recetas rápidas).
+      naproxeno: `${window.__dlkMedicamentos?.textos?.naproxeno || "Naproxeno 500mg #9 Tomar 1 tableta cada 8 horas por 3 días."} En caso de dolor no tolerable o indicación en posología.`
     },
     sutura: "Seda 3.0 punto simple",
     notaControles: sharedUtils.defaultPeriodontalControlNote
