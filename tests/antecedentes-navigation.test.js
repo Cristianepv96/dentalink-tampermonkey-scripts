@@ -33,6 +33,7 @@ test("al volver a la ficha sin recargar, el panel reaparece con lo respondido", 
   const { api, page } = loadAnamnesis({ pathname: FICHA, textareas: [section("Medicamentos")] });
   page.flush();
   api.panelEstado().estado.meds.add("Metformina");
+  api.panelEstado().estado.tocado = true; // como al responder en el panel
 
   page.location.pathname = "/pacientes/7/ficha/evoluciones";
   page.tick();
@@ -57,4 +58,26 @@ test("otro paciente empieza con su propia ficha", () => {
   page.tick();
   page.flush();
   assert.equal(api.panelEstado().estado.meds.has("Metformina"), false);
+});
+
+test("si la ficha termina de cargar después, el panel se actualiza mientras no se haya tocado", () => {
+  const { api, page } = loadAnamnesis({ pathname: FICHA, textareas: [section("Medicamentos")] });
+  page.flush();
+  page.setTextareas([section("Medicamentos", { list: ["losartan"] })]);
+  page.mutar();
+  page.flush();
+  assert.ok(api.panelEstado().estado.meds.has("Losartán"));
+});
+
+test("si ya se respondió algo, lo que cambie en la ficha no lo pisa", () => {
+  const { api, page } = loadAnamnesis({ pathname: FICHA, textareas: [section("Medicamentos")] });
+  page.flush();
+  const estado = api.panelEstado().estado;
+  estado.meds.add("Metformina");
+  estado.tocado = true;
+  page.setTextareas([section("Medicamentos", { list: ["losartan"] })]);
+  page.mutar();
+  page.flush();
+  assert.equal(api.panelEstado().estado, estado);
+  assert.ok(estado.meds.has("Metformina"));
 });

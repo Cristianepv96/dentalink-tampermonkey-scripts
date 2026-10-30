@@ -44,7 +44,8 @@ function loadAnamnesis({ pathname = "/pacientes/7/ficha/antecedentes", textareas
 
   class HTMLTextAreaElement {}
   class HTMLInputElement {}
-  class MutationObserver { observe() {} }
+  const observadores = [];
+  class MutationObserver { constructor(fn) { observadores.push(fn); } observe() {} }
 
   const context = {
     location,
@@ -77,7 +78,9 @@ function loadAnamnesis({ pathname = "/pacientes/7/ficha/antecedentes", textareas
       location,
       setTextareas(list) { current = list; },
       flush() { while (timers.length) timers.shift()(); },
-      tick() { intervals.forEach((fn) => fn()); }
+      tick() { intervals.forEach((fn) => fn()); },
+      // Simula que Dentalink cambió algo en la página.
+      mutar() { observadores.forEach((fn) => fn([{ target: {}, addedNodes: [{}], removedNodes: [] }])); }
     }
   };
 }

@@ -114,7 +114,9 @@
       alcohol: "", bruxismo: "", bruxTipo: new Set(), placa: "", otrosHab: new Set(),
       odontologicos: new Set(), limpieza: "", cepillado: "", seda: "", enjuague: "",
       fam: null, familiares: new Set(),
-      previos: {}, hechos: new Set()
+      // previos: lo de la ficha que el panel no entiende (solo se muestra);
+      // base: lo que el panel leyó y entiende, y por tanto puede reescribir.
+      previos: {}, hechos: new Set(), base: {}, tocado: false
     };
   }
 
@@ -177,8 +179,10 @@
     if (s.enfermedades.has("Hipertensión") && det(s, "Hipertensión").control === "No") {
       out.push({ tipo: "warn", titulo: "HTA no controlada", texto: "Tomar la presión antes de cada procedimiento.", alerta: "HTA NO CONTROLADA" });
     }
-    if (s.profilaxis.size || (det(s, "Cardiopatía").tipo || []).includes("Válvula protésica")) {
-      out.push({ tipo: "danger", titulo: "Requiere profilaxis antibiótica", texto: "Antes de sondaje, RAR y cirugía.", alerta: "REQUIERE PROFILAXIS ANTIBIOTICA" });
+    const motivosProfilaxis = [...s.profilaxis, ...((det(s, "Cardiopatía").tipo || []).includes("Válvula protésica") ? ["Válvula protésica"] : [])];
+    if (motivosProfilaxis.length) {
+      out.push({ tipo: "danger", titulo: "Requiere profilaxis antibiótica", texto: "Antes de sondaje, RAR y cirugía.",
+        alerta: `REQUIERE PROFILAXIS ANTIBIOTICA (${up(motivosProfilaxis.join(", "))})` });
     }
     if (s.embarazo === "Embarazo") {
       out.push({ tipo: "warn", titulo: `Embarazo${s.semanas ? ` (${s.semanas} semanas)` : ""}`,
@@ -235,10 +239,10 @@
         else out.push(up(f));
       });
     }
-    if (s.tabaco === "Exfumador") out.push(up(`Exfumador${s.dejo ? `, dejó hace ${s.dejo}` : ""}`));
+    if (s.tabaco === "Exfumador") out.push(up(`Exfumador${s.dejo ? ` (dejó hace ${s.dejo})` : ""}`));
     if (s.alcohol && s.alcohol !== "No") out.push(up(`Alcohol ${s.alcohol.toLowerCase()}`));
     if (s.bruxismo === "Sí") {
-      out.push(up(`Bruxismo${s.bruxTipo.size ? ` ${[...s.bruxTipo].join(" y ").toLowerCase()}` : ""}${s.placa === "Sí" ? ", usa placa" : s.placa === "No" ? ", sin placa" : ""}`));
+      out.push(up(`Bruxismo${s.bruxTipo.size ? ` ${[...s.bruxTipo].join(" y ").toLowerCase()}` : ""}${s.placa === "Sí" ? " (usa placa)" : s.placa === "No" ? " (sin placa)" : ""}`));
     }
     s.otrosHab.forEach((h) => out.push(up(h)));
     return out;
@@ -257,7 +261,7 @@
   // Nombre canónico → otros nombres con que aparece en el catálogo de la clínica.
   const ALIAS = {
     "Hipertensión": ["HIPERTENSION ARTERIAL", "HTA"],
-    "Diabetes": ["DIABETES MELLITUS", "DIABETES MELLITUS TIPO 2", "DM"],
+    "Diabetes": ["DIABETES MELLITUS", "DM"],
     "Exodoncias": ["EXODONCIA"],
     "Restauraciones": ["RESTAURACION"],
     "Prótesis": ["PROTESIS DENTAL"]
@@ -272,12 +276,56 @@
     "Antecedentes odontológicos": { paso: 5 }, "Antecedentes familiares": { paso: 6, clave: "fam" }
   };
 
-  const buscar = (catalogo, parte) => catalogo.find((item) => nombres(item).includes(parte));
-  const empiezaCon = (catalogo, parte) => catalogo.find((item) => nombres(item).some((n) => parte === n || parte.startsWith(`${n} `)));
+  // Separa «Otros …» en elementos. Las comas dentro de paréntesis o entre
+  // dígitos («7,6 %») no separan, y «ASA II, CONTROLADA POR MEDICAMENTOS» es uno.
+  function partir(texto) {
+    const partes = [];
+    let actual = "";
+    let nivel = 0;
+    const t = String(texto || "");
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (c === "(") nivel++;
+      if (c === ")") nivel = Math.max(0, nivel - 1);
+      if (c === "," && nivel === 0 && !(/\d/.test(t[i - 1] || "") && /\d/.test(t[i + 1] || ""))) {
+        partes.push(actual);
+        actual = "";
+      } else actual += c;
+    }
+    partes.push(actual);
+    return partes.map(spaces).filter((p) => p && p !== "\"\"").reduce((out, p) => {
+      if (norm(p) === "CONTROLADA POR MEDICAMENTOS" && /^ASA\b/.test(norm(out.at(-1) || ""))) out[out.length - 1] += `, ${p}`;
+      else out.push(p);
+      return out;
+    }, []);
+  }
 
-  // Cada reconocedor recibe la parte normalizada y la original; devuelve true si la entendió.
+  const buscar = (catalogo, parte) => catalogo.find((item) => nombres(item).includes(parte));
+  const opcion = (opciones, texto) => opciones.find((o) => key(o) === key(texto));
+  // Lo que va entre paréntesis al final: «CARDIOPATÍA (STENT, VÁLVULA)» → ["STENT", "VÁLVULA"].
+  const entreParentesis = (crudo) => (crudo.match(/\(([^)]*)\)\s*$/)?.[1] || "").split(/\s*,\s*/).filter(Boolean);
+
+  // Enfermedad por su nombre exacto, o con los detalles que el propio panel escribe.
+  const DETALLE_ENF = {
+    "Hipertensión": /^(CONTROLADA|NO CONTROLADA)$/,
+    "Diabetes": /^(MELLITUS( TIPO [12])?)?( ?HBA1C \d+( \d)?)?$/,
+    "Cardiopatía": /^[A-Z ]+$/
+  };
+  function enfermedadDe(p) {
+    for (const enf of Object.keys(ENF)) {
+      for (const n of nombres(enf)) {
+        if (p === n) return enf;
+        const resto = p.startsWith(`${n} `) ? p.slice(n.length + 1) : null;
+        if (resto && DETALLE_ENF[enf]?.test(resto)) return enf;
+      }
+    }
+    return null;
+  }
+
+  // Cada reconocedor recibe la parte normalizada (p), la original (crudo) y el estado;
+  // devuelve true si la entendió. Que el estado la reproduzca igual se comprueba después.
   const RECONOCEDORES = {
-    "Alertas médicas": (p, s) => {
+    "Alertas médicas": (p, crudo, s) => {
       if (/^ASA\b/.test(p)) return true; // se recalcula
       const alergia = p.match(/^ALERGIA A (.+)$/);
       const encontrada = alergia && ALERGIAS.find((a) => norm(a.t) === alergia[1]);
@@ -285,18 +333,26 @@
       const embarazo = p.match(/^EMBARAZO(?: (\d+) SEMANAS)?$/);
       if (embarazo) { s.embarazo = "Embarazo"; s.semanas = embarazo[1] || ""; return true; }
       if (p === "LACTANCIA") { s.embarazo = "Lactancia"; return true; }
-      if (p.startsWith("REQUIERE PROFILAXIS")) return true;
+      if (p.startsWith("REQUIERE PROFILAXIS ANTIBIOTICA")) {
+        entreParentesis(crudo).forEach((m) => { const o = opcion(PROFILAXIS, m); if (o) s.profilaxis.add(o); });
+        return true;
+      }
+      if (/^RIESGO( ALTO)? DE OSTEONECROSIS\b/.test(p)) {
+        const tiempo = opcion(ENF["Osteoporosis"].preguntas[0].op, entreParentesis(crudo)[0] || "");
+        if (tiempo) (s.det["Osteoporosis"] ||= {}).tiempo = tiempo;
+        return true;
+      }
       // Alertas que el panel vuelve a deducir de enfermedades y medicamentos.
-      return /^(ANTICOAGULADO|ANTIAGREGADO|RIESGO( ALTO)? DE OSTEONECROSIS|DIABETES NO CONTROLADA|HTA NO CONTROLADA|INMUNOSUPRIMIDO|RIESGO DE HIPOGLUCEMIA)\b/.test(p);
+      return /^(ANTICOAGULADO|ANTIAGREGADO|DIABETES NO CONTROLADA|HTA NO CONTROLADA|INMUNOSUPRIMIDO|RIESGO DE HIPOGLUCEMIA)\b/.test(p);
     },
-    "Enfermedades": (p, s) => {
-      const enf = empiezaCon(Object.keys(ENF), p);
+    "Enfermedades": (p, crudo, s) => {
+      const enf = enfermedadDe(p);
       if (!enf) return false;
       s.enfermedades.add(enf);
       const d = (s.det[enf] ||= {});
       if (enf === "Hipertensión") {
-        if (/NO CONTROLADA$/.test(p)) d.control = "No";
-        else if (/CONTROLADA$/.test(p)) d.control = "Sí";
+        if (/ NO CONTROLADA$/.test(p)) d.control = "No";
+        else if (/ CONTROLADA$/.test(p)) d.control = "Sí";
       }
       if (enf === "Diabetes") {
         const tipo = p.match(/TIPO ([12])/);
@@ -304,26 +360,41 @@
         const h = p.match(/HBA1C (\d+)(?: (\d))?/);
         if (h) d.hba1c = h[2] ? `${h[1]},${h[2]}` : h[1];
       }
+      if (enf === "Cardiopatía") {
+        const tipos = entreParentesis(crudo).map((t) => opcion(ENF["Cardiopatía"].preguntas[0].op, t)).filter(Boolean);
+        if (tipos.length) d.tipo = [...new Set([...(d.tipo || []), ...tipos])];
+      }
       return true;
     },
-    "Medicamentos": (p, s) => {
+    "Medicamentos": (p, crudo, s) => {
       const med = buscar(MEDS_TODOS, p);
       if (med) s.meds.add(med);
       return Boolean(med);
     },
-    "Hábitos": (p, s) => {
+    "Hábitos": (p, crudo, s) => {
+      const k = key(crudo);
       if (/^FUMA(DORA?)?\b/.test(p)) {
         s.tabaco = "Fuma";
         if (/CIGARRILLO|^FUMADORA?$/.test(p)) s.fuma.add("Cigarrillo");
-        const cantidad = ["10–20", "1–5", "6–9", "> 20"].find((c) => p.includes(` ${norm(c)} `));
+        const cantidad = CANTIDAD.find((c) => k.includes(` ${key(c)} AL DIA`));
         if (cantidad) s.cantidad = cantidad;
+        const anios = k.match(/ HACE (.+)$/);
+        if (anios) s.anios = opcion(ANIOS, anios[1]) || "";
         return true;
       }
-      if (/^CONSUME CANNABIS/.test(p)) { s.tabaco = "Fuma"; s.fuma.add("Cannabis"); return true; }
-      if (/^USA VAPEADOR/.test(p)) { s.tabaco = "Fuma"; s.fuma.add("Vapeador"); return true; }
-      if (/^EX ?FUMADORA?\b/.test(p)) { s.tabaco = "Exfumador"; return true; }
+      const frecuencia = (m) => FRECUENCIA.find((f) => norm(f) === m) || "";
+      const cannabis = p.match(/^CONSUME CANNABIS ?(OCASIONAL|SEMANAL|DIARIO)?$/);
+      if (cannabis) { s.tabaco = "Fuma"; s.fuma.add("Cannabis"); s.cannabisFrec = frecuencia(cannabis[1]); return true; }
+      const vapeo = p.match(/^USA VAPEADOR ?(OCASIONAL|SEMANAL|DIARIO)?$/);
+      if (vapeo) { s.tabaco = "Fuma"; s.fuma.add("Vapeador"); s.vapeoFrec = frecuencia(vapeo[1]); return true; }
+      if (/^EX ?FUMADORA?\b/.test(p)) {
+        s.tabaco = "Exfumador";
+        const dejo = k.match(/DEJO HACE (.+)\)$/);
+        if (dejo) s.dejo = opcion(DEJO, dejo[1]) || "";
+        return true;
+      }
       const alcohol = p.match(/^ALCOHOL (OCASIONAL|SEMANAL|DIARIO)$/);
-      if (alcohol) { s.alcohol = FRECUENCIA.find((f) => norm(f) === alcohol[1]); return true; }
+      if (alcohol) { s.alcohol = frecuencia(alcohol[1]); return true; }
       if (/^BRUXISMO\b/.test(p)) {
         s.bruxismo = "Sí";
         if (/NOCTURNO/.test(p)) s.bruxTipo.add("Nocturno");
@@ -336,123 +407,174 @@
       if (otro) s.otrosHab.add(otro);
       return Boolean(otro);
     },
-    "Antecedentes odontológicos": (p, s) => {
-      const cep = p.match(/^CEPILLADO (\d|MAS DE 3|3) VECES AL DIA$/);
+    "Antecedentes odontológicos": (p, crudo, s) => {
+      const cep = key(crudo).match(/^CEPILLADO (.+) VECES AL DIA$/);
       if (cep) { s.cepillado = cep[1]; return true; }
       if (p === "USA SEDA DENTAL" || p === "NO USA SEDA DENTAL") { s.seda = p.startsWith("NO") ? "No" : "Sí"; return true; }
       if (p === "USA ENJUAGUE" || p === "NO USA ENJUAGUE") { s.enjuague = p.startsWith("NO") ? "No" : "Sí"; return true; }
-      const limpieza = p.match(/^ULTIMA PROFILAXIS (.+)$/);
-      const valor = limpieza && LIMPIEZA.find((l) => norm(l) === limpieza[1]);
-      if (valor) { s.limpieza = valor; return true; }
+      const limpieza = key(crudo).match(/^ULTIMA PROFILAXIS: (.+)$/);
+      if (limpieza) { s.limpieza = opcion(LIMPIEZA, limpieza[1]) || ""; return Boolean(s.limpieza); }
       const odo = buscar(ODONTO, p);
       if (odo) s.odontologicos.add(odo);
       return Boolean(odo);
     },
-    "Antecedentes familiares": (p, s) => {
+    "Antecedentes familiares": (p, crudo, s) => {
       const fam = buscar(FAMILIARES, p);
       if (fam) s.familiares.add(fam);
       return Boolean(fam);
     }
   };
 
-  const partesDe = (seccion) => [...(seccion?.lista || []), ...String(seccion?.texto || "").split(/\s*,\s*/)]
-    .map((t) => spaces(t)).filter((t) => t && t !== "\"\"");
+  // Los conjuntos de cada sección con lista y el texto que el panel escribe en ella.
+  const LISTAS = {
+    "Enfermedades": (s) => s.enfermedades,
+    "Medicamentos": (s) => s.meds,
+    "Antecedentes odontológicos": (s) => s.odontologicos,
+    "Antecedentes familiares": (s) => s.familiares
+  };
+  function textoDe(titulo, s) {
+    switch (titulo) {
+      case "Alertas médicas": // el ASA solo si se respondió por las enfermedades
+        return [...(s.enf !== null || s.enfermedades.size ? [asaSugerido(s).asa] : []), ...alertasFinales(s)];
+      case "Enfermedades": { // solo los detalles que la lista no puede guardar
+        const lista = [...s.enfermedades];
+        return enfermedadesFinales(s).filter((t, i) => !nombres(lista[i]).includes(norm(t)));
+      }
+      case "Hábitos": return habitosFinales(s);
+      case "Antecedentes odontológicos": return higiene(s) ? higiene(s).split(", ") : [];
+      default: return [];
+    }
+  }
+
+  // Una etiqueta de lista sigue siendo cierta si lo que significa sigue en el estado.
+  function vigente(titulo, p, crudo, s) {
+    const aparte = crearEstado();
+    if (!RECONOCEDORES[titulo]?.(p, crudo, aparte)) return null;
+    const vacio = crearEstado();
+    return Object.keys(aparte).every((k) => {
+      const v = aparte[k];
+      if (v instanceof Set) return [...v].every((x) => s[k].has(x));
+      if (k === "det") return Object.entries(v).every(([e, d]) => Object.entries(d).every(([c, x]) => JSON.stringify(det(s, e)[c]) === JSON.stringify(x)));
+      if (v && typeof v === "object") return true; // previos, base, medDesde: no son respuestas
+      return v === vacio[k] || v === s[k];
+    });
+  }
+
+  // Un texto escrito por el panel es suyo solo si el estado lo vuelve a producir igual.
+  function reproduce(titulo, crudo, s, deLista) {
+    const k = key(crudo);
+    if (titulo === "Alertas médicas" && /^ASA\b/.test(k)) return true;
+    if (deLista || LISTAS[titulo]) {
+      const fresco = crearEstado();
+      if (vigente(titulo, norm(crudo), crudo, s) && RECONOCEDORES[titulo](norm(crudo), crudo, fresco)
+        && (deLista || [...(LISTAS[titulo]?.(fresco) || [])].some((x) => nombres(x).includes(norm(crudo))))) return true;
+    }
+    return textoDe(titulo, s).some((t) => key(t) === k);
+  }
 
   // La ficha como respuestas del panel, para confirmar y corregir.
   function estadoDesdeFicha(secciones) {
     const s = crearEstado();
+    const pendientes = [];
     for (const [titulo, seccion] of Object.entries(secciones)) {
       const meta = SECCION_PASO[titulo];
       if (!meta) continue;
-      const partes = partesDe(seccion);
+      const partes = [
+        ...(seccion.lista || []).map((crudo) => ({ crudo: spaces(crudo), deLista: true })),
+        ...partir(seccion.texto).map((crudo) => ({ crudo, deLista: false }))
+      ].filter((x) => x.crudo);
       if (!partes.length) continue;
       s.hechos.add(meta.paso);
+      const base = (s.base[titulo] = new Set());
 
       const reconocer = RECONOCEDORES[titulo];
       if (!reconocer) { // Motivo y Enfermedad actual: se conservan tal cual
-        s.previos[titulo] = [spaces(seccion.texto) || partes.join(", ")];
+        s.previos[titulo] = [spaces(seccion.texto) || partes.map((x) => x.crudo).join(", ")];
         continue;
       }
-      const reales = partes.filter((p) => !NADA.test(norm(p)));
-      const soloAsa = reales.length && reales.every((p) => /^ASA\b/.test(norm(p)));
-      const niega = !reales.length || (titulo === "Alertas médicas" && soloAsa);
+      const reales = partes.filter((x) => !NADA.test(norm(x.crudo)));
+      partes.filter((x) => NADA.test(norm(x.crudo))).forEach((x) => base.add(key(x.crudo)));
+      const niega = !reales.length || (titulo === "Alertas médicas" && reales.every((x) => /^ASA\b/.test(norm(x.crudo))));
       if (meta.clave) s[meta.clave] = !niega;
       if (titulo === "Hábitos" && niega) s.tabaco = "No";
-      if (niega) continue;
 
       const vistos = new Set();
-      for (const parte of reales) {
-        const p = norm(parte);
-        if (vistos.has(p)) continue;
-        vistos.add(p);
-        if (!reconocer(p, s)) (s.previos[titulo] ||= []).push(parte);
+      for (const x of reales) {
+        if (vistos.has(`${x.deLista}|${key(x.crudo)}`)) continue;
+        vistos.add(`${x.deLista}|${key(x.crudo)}`);
+        if (reconocer(norm(x.crudo), x.crudo, s)) pendientes.push({ titulo, ...x });
+        else (s.previos[titulo] ||= []).push(x.crudo);
       }
+    }
+    // Con todo leído, se comprueba qué entiende de verdad el panel.
+    for (const x of pendientes) {
+      if (reproduce(x.titulo, x.crudo, s, x.deLista)) s.base[x.titulo].add(key(x.crudo));
+      else (s.previos[x.titulo] ||= []).push(x.crudo);
     }
     if (s.tabaco === "" && s.hechos.has(4)) s.tabaco = "No";
     return s;
   }
 
   // Paciente nuevo: ninguna sección tiene nada (las comillas del motivo no cuentan).
-  const fichaVacia = (secciones) => Object.values(secciones).every((seccion) => !partesDe(seccion).length);
+  const fichaVacia = (secciones) => Object.values(secciones).every((seccion) => !(seccion.lista || []).length && !partir(seccion.texto).length);
 
   // ═══ 4. Plan de escritura: qué marcar, qué quitar y qué texto dejar ══════
-  // Lista de cada sección: catálogo donde buscar y conjunto del estado.
-  const LISTAS = {
-    "Enfermedades": { catalogo: () => Object.keys(ENF), estado: (s) => s.enfermedades, reconocer: (p) => empiezaCon(Object.keys(ENF), p) },
-    "Medicamentos": { catalogo: () => MEDS_TODOS, estado: (s) => s.meds },
-    "Antecedentes odontológicos": { catalogo: () => ODONTO, estado: (s) => s.odontologicos },
-    "Antecedentes familiares": { catalogo: () => FAMILIARES, estado: (s) => s.familiares }
-  };
-
-  // El texto «Otros …» se reconstruye: lo no reconocido de antes + lo que dice el panel.
-  function textoDe(titulo, s) {
-    switch (titulo) {
-      case "Alertas médicas": return [asaSugerido(s).asa, ...alertasFinales(s)];
-      case "Enfermedades": // solo los detalles que la lista no puede guardar
-        return enfermedadesFinales(s).filter((t, i) => !nombres([...s.enfermedades][i]).includes(norm(t)));
-      case "Hábitos": return habitosFinales(s);
-      case "Antecedentes odontológicos": return higiene(s) ? [higiene(s)] : [];
-      default: return [];
-    }
-  }
-
+  // Se quita o reescribe solo lo que el panel leyó y entiende (base); lo demás se respeta.
   function planEscritura(s, ficha) {
     const plan = {};
     for (const [titulo, seccion] of Object.entries(ficha)) {
       const lista = seccion.lista || [];
-      const previos = s.previos[titulo] || [];
+      const base = s.base[titulo] || new Set();
+      const actual = partir(seccion.texto);
 
       if (titulo === "Motivo de consulta" || titulo === "Enfermedad actual") {
         const propio = titulo === "Motivo de consulta" ? motivoFinal(s) : enfermedadActual(s);
-        plan[titulo] = { marcar: [], quitar: [], texto: previos.length ? previos.join(", ") : propio };
+        plan[titulo] = { marcar: [], quitar: [], alias: {}, texto: actual.length ? spaces(seccion.texto) : propio };
         continue;
       }
 
-      const cfg = LISTAS[titulo];
-      const elegidos = cfg ? [...cfg.estado(s)] : [];
-      const reconocer = cfg?.reconocer || ((p) => cfg && buscar(cfg.catalogo(), p));
+      const elegidos = LISTAS[titulo] ? [...LISTAS[titulo](s)] : [];
+      const nuevos = textoDe(titulo, s);
       const quitar = [];
       const quedan = [];
       for (const etiqueta of lista) {
         const p = norm(etiqueta);
-        const item = cfg && reconocer(p);
-        const desmarcado = item && !elegidos.includes(item);
-        const vacia = NADA.test(p) && elegidos.length;
-        if (desmarcado || vacia) quitar.push(etiqueta);
+        if (NADA.test(p)) continue; // se decide al final
+        const propia = base.has(key(etiqueta));
+        if (propia && vigente(titulo, p, etiqueta, s) === false) quitar.push(etiqueta);
         else quedan.push(etiqueta);
       }
       const marcar = elegidos.filter((item) => !quedan.some((etiqueta) => nombres(item).includes(norm(etiqueta))));
 
-      // Se respeta el orden del texto que ya había; lo nuevo va al final.
-      const nuevos = textoDe(titulo, s);
-      const validos = new Set([...previos, ...nuevos].map(norm));
+      // El ASA que no se volvió a calcular (enfermedades sin responder) se conserva.
+      const sinAsaNuevo = !nuevos.some((t) => /^ASA\b/.test(norm(t)));
       const partes = [];
-      const agregar = (parte) => { if (!partes.some((x) => norm(x) === norm(parte))) partes.push(parte); };
-      String(seccion.texto || "").split(/\s*,\s*/).map(spaces).filter((p) => validos.has(norm(p))).forEach(agregar);
-      [...previos, ...nuevos].forEach(agregar);
-      const listaFinal = quedan.length + marcar.length;
-      if (!partes.length && !listaFinal && SECCION_PASO[titulo]?.paso !== 5) partes.push("NIEGA");
-      plan[titulo] = { marcar, quitar, texto: partes.join(", ") };
+      const agregar = (parte) => {
+        const repetida = partes.some((x) => key(x) === key(parte)) || quedan.some((x) => norm(x) === norm(parte));
+        if (!repetida) partes.push(parte);
+      };
+      actual.filter((parte) => !NADA.test(norm(parte))).forEach((parte) => {
+        const propia = base.has(key(parte));
+        const asa = titulo === "Alertas médicas" && /^ASA\b/.test(norm(parte));
+        if (!propia || nuevos.some((t) => key(t) === key(parte)) || (asa && sinAsaNuevo)) agregar(parte);
+      });
+      nuevos.forEach(agregar);
+
+      const hayDatos = quedan.length + marcar.length + partes.length > 0;
+      lista.filter((etiqueta) => NADA.test(norm(etiqueta))).forEach((etiqueta) => { if (hayDatos) quitar.push(etiqueta); });
+      const niegaAhora = SECCION_PASO[titulo].clave ? s[SECCION_PASO[titulo].clave] === false
+        : titulo === "Hábitos" && s.tabaco === "No";
+      const yaNiega = lista.some((e) => NADA.test(norm(e))) || actual.some((t) => NADA.test(norm(t)));
+      if (!hayDatos && (niegaAhora || yaNiega)) {
+        const textoNada = actual.find((t) => NADA.test(norm(t)));
+        if (textoNada) partes.push(textoNada);
+        else if (!lista.some((e) => NADA.test(norm(e)))) partes.push("NIEGA");
+      }
+
+      // Diabetes: buscar en la lista el nombre de su tipo, no el de otro.
+      const alias = {};
+      if (marcar.includes("Diabetes") && det(s, "Diabetes").tipo) alias.Diabetes = [up(`Diabetes mellitus ${det(s, "Diabetes").tipo}`)];
+      plan[titulo] = { marcar, quitar, alias, texto: partes.join(", ") };
     }
     return plan;
   }
@@ -486,11 +608,13 @@
       }
       for (const item of paso.marcar) {
         if (!sigue()) return resultado;
-        if (await pickFromList(card, item)) resultado.marcados.push(item);
+        const marcado = await pickFromList(card, item, paso.alias?.[item] || [], sigue);
+        if (marcado === "cancelado") return resultado;
+        if (marcado) resultado.marcados.push(item);
         else { resultado.aTexto.push(item); extra.push(up(item)); }
       }
       if (!sigue()) return resultado;
-      const partes = paso.texto ? paso.texto.split(/\s*,\s*/) : [];
+      const partes = partir(paso.texto);
       extra.forEach((parte) => { if (!partes.some((x) => norm(x) === norm(parte))) partes.push(parte); });
       // Lo que no se encontró en la lista reemplaza un «NIEGA».
       const texto = (extra.length ? partes.filter((p) => norm(p) !== "NIEGA") : partes).join(", ");
@@ -777,6 +901,19 @@
     panel.abierto = Math.min(panel.abierto + 1, PASOS.length - 1);
   }
 
+  // Responder «No» borra lo elegido en esa sección: el panel no puede decir
+  // «Niega» y a la vez escribir datos.
+  const AL_NEGAR = {
+    alertas: (s) => { s.alergias.clear(); s.profilaxis.clear(); s.embarazo = ""; s.semanas = ""; },
+    enf: (s) => { s.enfermedades.clear(); s.det = {}; },
+    med: (s) => { s.meds.clear(); s.medDesde = {}; },
+    fam: (s) => { s.familiares.clear(); }
+  };
+  function responder(s, clave, valor) {
+    s[clave] = valor;
+    if (valor === false) AL_NEGAR[clave]?.(s);
+  }
+
   function alternarMed(s, med, desde) {
     if (s.meds.has(med)) { s.meds.delete(med); delete s.medDesde[med]; return; }
     s.meds.add(med);
@@ -807,6 +944,7 @@
     e.preventDefault();
     const s = panel.estado;
     const accion = t.dataset.an;
+    if (!["abrir", "plegar", "siguiente"].includes(accion) && t.dataset.paso === undefined) s.tocado = true;
     if (accion === "abrir") return alternarPanel(true);
     if (accion === "plegar") return alternarPanel(false);
     if (accion === "siguiente") { avanzar(); return pintar(); }
@@ -820,7 +958,7 @@
     if (t.dataset.paso !== undefined) { panel.abierto = Number(t.dataset.paso); return pintar(); }
     const yn = t.closest("[data-yn]");
     if (yn) {
-      s[yn.dataset.yn] = t.dataset.v === "si";
+      responder(s, yn.dataset.yn, t.dataset.v === "si");
       if (t.dataset.v === "no") avanzar();
       return pintar();
     }
@@ -873,6 +1011,7 @@
     }
     if (el.dataset.text) s[el.dataset.text] = el.value;
     else if (el.dataset.detinput) detDe(s, el.dataset.detinput)[el.dataset.k] = el.value;
+    s.tocado = true;
   }
 
   function alTeclear(e) {
@@ -951,7 +1090,7 @@
 
   // Busca el elemento en el desplegable de Dentalink, marca su casilla y pulsa Aceptar.
   // Solo toca casillas y Aceptar: nunca "Nuevo …" ni la papelera, que cambian el catálogo.
-  async function pickFromList(card, item) {
+  async function pickFromList(card, item, extra = [], sigue = () => true) {
     const { button, panel } = listParts(card);
     if (!button || !panel) return false;
     if (panel.offsetParent === null) {
@@ -961,7 +1100,7 @@
     const search = panel.querySelector("input:not([type=checkbox])");
     if (search) setInputValue(search, norm(item).slice(0, 6).toLowerCase());
 
-    const wanted = nombres(item);
+    const wanted = [...extra.map(norm), ...nombres(item)];
     let box = null;
     for (let waited = 0; waited < 3000 && !box; waited += 150) {
       await sleep(150);
@@ -969,6 +1108,10 @@
         .find((input) => wanted.includes(norm(input.parentElement?.textContent)));
     }
     const accept = [...panel.querySelectorAll("footer *")].find((el) => spaces(el.textContent) === "Aceptar");
+    if (!sigue()) { // se salió de la ficha mientras buscaba
+      document.body.click();
+      return "cancelado";
+    }
     if (!box || !accept) {
       if (search) setInputValue(search, "");
       document.body.click(); // cierra el desplegable sin cambiar nada
@@ -1015,12 +1158,24 @@
       return;
     }
     const paciente = ficha[1];
-    if (panel.raiz && panel.paciente === paciente) return;
     const secciones = leerSecciones();
     if (!Object.keys(secciones).length) return; // la ficha aún no carga
-    if (!memoria.has(paciente)) memoria.set(paciente, estadoDesdeFicha(secciones));
+    const firma = JSON.stringify(secciones);
+    const guardado = memoria.get(paciente);
+
+    if (panel.raiz && panel.paciente === paciente) {
+      // Mientras no se haya respondido nada, el panel sigue a la ficha (puede cargar tarde).
+      if (panel.estado.tocado || firma === panel.firma) return;
+      panel.firma = firma;
+      panel.estado = estadoDesdeFicha(secciones);
+      memoria.set(paciente, panel.estado);
+      return pintar();
+    }
+    const estado = guardado?.tocado ? guardado : estadoDesdeFicha(secciones);
+    memoria.set(paciente, estado);
     panel.paciente = paciente;
-    montarPanel(memoria.get(paciente), { plegado: !fichaVacia(secciones) });
+    panel.firma = firma;
+    montarPanel(estado, { plegado: !fichaVacia(secciones) });
   }
 
   let timer = null;
@@ -1045,7 +1200,7 @@
     globalThis.__dlkAnamTest = {
       crearEstado, fmt, leerNumero, enfermedadActual, motivoFinal, avisos, gradoTabaco, asaSugerido,
       alertasFinales, enfermedadesFinales, habitosFinales, higiene, estadoDesdeFicha, fichaVacia, ALIAS,
-      planEscritura, leerSecciones, aplicarPlan, PASOS, htmlPanel, montarPanel, alternarPanel,
+      planEscritura, leerSecciones, aplicarPlan, PASOS, htmlPanel, montarPanel, alternarPanel, responder, partir,
       panelEstado: () => ({ montado: Boolean(panel.raiz), plegado: panel.plegado, estado: panel.estado })
     };
   }

@@ -6,7 +6,7 @@ const norm = (t) => String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCa
 
 // Tarjeta de Dentalink con su desplegable «Añadir …»: buscador, casillas, Aceptar,
 // y también «Nuevo …» y papeleras, que el script nunca debe tocar.
-function tarjeta(titulo, { catalogo = [], elegidos = [], texto = "", responde = true, clics, alAceptar } = {}) {
+function tarjeta(titulo, { catalogo = [], elegidos = [], texto = "", responde = true, clics, alAceptar, alAbrir } = {}) {
   const el = (props = {}) => ({ children: [], textContent: "", parentElement: null, ...props });
   const chips = [];
   const card = el();
@@ -41,7 +41,7 @@ function tarjeta(titulo, { catalogo = [], elegidos = [], texto = "", responde = 
     querySelector: (sel) => (sel.startsWith("input:not") ? buscador : null),
     querySelectorAll: (sel) => sel === "input[type=checkbox]" ? filas : sel === "footer *" ? [aceptar] : sel === "i.fa-trash" ? [papelera] : []
   });
-  const boton = el({ textContent: `Añadir ${titulo.toLowerCase()}`, click: () => { clics.push("abrir"); panel.offsetParent = {}; } });
+  const boton = el({ textContent: `Añadir ${titulo.toLowerCase()}`, click: () => { clics.push("abrir"); panel.offsetParent = {}; alAbrir?.(); } });
   boton.parentElement = el();
   boton.parentElement.nextElementSibling = panel;
 
@@ -116,4 +116,17 @@ test("leerSecciones junta etiquetas y texto por sección", () => {
   const secciones = api.leerSecciones();
   assert.deepEqual([...secciones.Medicamentos.lista], ["losartan"]);
   assert.equal(secciones.Medicamentos.texto, "ASA");
+});
+
+test("si la ruta cambia mientras busca, no marca nada", async () => {
+  const clics = [];
+  let page;
+  const meds = tarjeta("Medicamentos", { catalogo: ["METFORMINA"], clics,
+    alAbrir: () => { page.location.pathname = "/pacientes/8/ficha/antecedentes"; } });
+  const loaded = cargar([meds]);
+  page = loaded.page;
+  const r = await loaded.api.aplicarPlan({ Medicamentos: { marcar: ["Metformina"], quitar: [], alias: {}, texto: "" } }, { ruta: "/pacientes/7/ficha/antecedentes" });
+  assert.equal(r.cancelado, true);
+  assert.ok(!clics.includes("casilla:METFORMINA"));
+  assert.ok(!clics.includes("aceptar"));
 });
