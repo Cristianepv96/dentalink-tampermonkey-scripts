@@ -4,3 +4,4 @@ node_modules/
 outputs/
 *.zip
 *.log
+.superpowers/
