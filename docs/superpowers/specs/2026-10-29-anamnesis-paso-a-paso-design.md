@@ -74,9 +74,9 @@ completa.
 
 ### Interfaz
 
-- Panel fijo a la derecha (~460 px) que no tapa la ficha; la ficha se ve a la
-  izquierda llenándose en vivo con estilo «pendiente» (borde punteado) hasta
-  confirmar.
+- Panel fijo a la derecha (~460 px). A diferencia del boceto, la ficha real no
+  se llena en vivo (eso escribiría en Dentalink antes de confirmar): los cambios
+  pendientes se muestran en la revisión final y se escriben al confirmar.
 - 8 pasos en acordeón: uno abierto a la vez; cada paso cerrado muestra un
   resumen de una línea. Barra de progreso y «Paso n de 8».
 - Pasos con pregunta Sí/No: «No» completa el paso y abre el siguiente; «Sí»
