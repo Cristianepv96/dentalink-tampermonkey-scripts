@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Botones receta rapida
 // @namespace    https://odontofamily.local/dentalink-recetas
-// @version      1.5.0
+// @version      1.6.0
 // @description  Agrega botones para insertar recetas predefinidas en Dentalink, sin duplicar medicamentos y con avisos según las alertas del paciente.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.3.0
 // @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-medicamentos.js?v=1.0.0
 // @grant        none
 // @run-at       document-idle
@@ -16,7 +16,7 @@
 (function () {
   "use strict";
 
-  const { isVisible, escapeHtml, watchPage } = window.__dlkUtils;
+  const { isVisible, escapeHtml, watchPage, getPatientIdFromUrl } = window.__dlkUtils;
   const TEXTOS = window.__dlkMedicamentos?.textos || {};
 
   const PANEL_ID = "dlk-recetas-rapidas";
@@ -150,13 +150,24 @@
     return normalize(text.replace(label, ""));
   }
 
+  // La anamnesis que Evoluciones periodoncia guarda en esta pestaña al visitar la ficha:
+  // trae lo elegido en las listas y el texto «Otros …», que el encabezado puede no mostrar.
+  function readAnamnesisField(label) {
+    try {
+      const records = JSON.parse(sessionStorage.getItem("dlk_anamnesis_context_v1") || "{}");
+      return normalize(records?.[getPatientIdFromUrl?.()]?.fields?.[label]);
+    } catch (_) {
+      return "";
+    }
+  }
+
   function warningsFor(recipe) {
     const header = {};
     const reasons = [];
     RULES.forEach((rule) => {
       if (!rule.items.some((item) => recipe.items.includes(item))) return;
       const matched = rule.fields.find((field) => {
-        header[field] = header[field] ?? readHeaderField(field);
+        header[field] = header[field] ?? `${readHeaderField(field)} ${readAnamnesisField(field)}`.trim();
         return rule.pattern.test(header[field]);
       });
       if (matched) reasons.push(`${rule.reason} (${matched.toLowerCase()})`);

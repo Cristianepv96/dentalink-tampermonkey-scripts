@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.2.3
+// @version      3.3.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.2
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.3.0
 // @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-medicamentos.js?v=1.0.0
 // @grant        none
 // @run-at       document-idle
@@ -827,8 +827,9 @@
     return ANAMNESIS_PATH.test(location.pathname);
   }
 
-  function getAnamnesisSectionLabel(textarea) {
-    if (textarea.id === "comentarios") return "Comentarios";
+  // La tarjeta de la sección y su título; «Comentarios» no tiene tarjeta con lista.
+  function getAnamnesisSection(textarea) {
+    if (textarea.id === "comentarios") return { label: "Comentarios", card: null };
 
     let current = textarea.parentElement;
     while (current && current !== document.body) {
@@ -836,10 +837,21 @@
       const label = ANAMNESIS_FIELD_LABELS.find((candidate) => text.startsWith(candidate));
       const hasSearch = current.querySelector?.("input[placeholder^='Buscar']");
       const hasSingleTextarea = current.querySelectorAll?.("textarea").length === 1;
-      if (label && hasSearch && hasSingleTextarea) return label;
+      if (label && hasSearch && hasSingleTextarea) return { label, card: current };
       current = current.parentElement;
     }
-    return "";
+    return { label: "", card: null };
+  }
+
+  // Lo elegido en la lista de Dentalink de la sección: etiquetas con ×, fuera del desplegable.
+  function anamnesisListItems(card) {
+    if (!card) return [];
+    const button = [...card.querySelectorAll("button")].find((b) => /^Añadir\b/.test(normalizePlanText(b.textContent)));
+    const dropdown = button?.parentElement?.nextElementSibling;
+    return [...card.querySelectorAll("i.fa-close")]
+      .filter((icon) => !dropdown?.contains(icon) && icon.previousElementSibling?.tagName === "SPAN")
+      .map((icon) => normalizePlanText(icon.previousElementSibling.textContent))
+      .filter(Boolean);
   }
 
   function readAnamnesisRecords() {
@@ -864,9 +876,9 @@
 
     const fields = {};
     document.querySelectorAll("main textarea").forEach((textarea) => {
-      const label = getAnamnesisSectionLabel(textarea);
+      const { label, card } = getAnamnesisSection(textarea);
       if (!label) return;
-      fields[label] = normalizePlanText(textarea.value);
+      fields[label] = [...anamnesisListItems(card), normalizePlanText(textarea.value)].filter(Boolean).join(", ");
     });
 
     // Evita reemplazar un registro completo mientras Dentalink todavía está
