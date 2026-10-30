@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Botones receta rapida
 // @namespace    https://odontofamily.local/dentalink-recetas
-// @version      1.6.0
+// @version      1.7.0
 // @description  Agrega botones para insertar recetas predefinidas en Dentalink, sin duplicar medicamentos y con avisos según las alertas del paciente.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -150,8 +150,25 @@
     return normalize(text.replace(label, ""));
   }
 
+  // Los antecedentes que Dentalink ya trae en la página (window.__STATE): por cada sección,
+  // el texto «Otros …» (detalle) y lo marcado en la lista (nombre con value "1").
+  function readPageAnamnesisField(label) {
+    try {
+      const raw = window.__STATE;
+      const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (!data || String(data.id) !== String(getPatientIdFromUrl?.())) return "";
+      return normalize((data.antecedentes || [])
+        .filter((row) => row.tipo_antecedente_nombre === label)
+        .flatMap((row) => [row.detalle, row.value === "1" ? row.nombre : ""])
+        .filter(Boolean)
+        .join(", "));
+    } catch (_) {
+      return "";
+    }
+  }
+
   // La anamnesis que Evoluciones periodoncia guarda en esta pestaña al visitar la ficha:
-  // trae lo elegido en las listas y el texto «Otros …», que el encabezado puede no mostrar.
+  // cubre lo cambiado después de cargar la página, que __STATE aún no tiene.
   function readAnamnesisField(label) {
     try {
       const records = JSON.parse(sessionStorage.getItem("dlk_anamnesis_context_v1") || "{}");
@@ -167,7 +184,7 @@
     RULES.forEach((rule) => {
       if (!rule.items.some((item) => recipe.items.includes(item))) return;
       const matched = rule.fields.find((field) => {
-        header[field] = header[field] ?? `${readHeaderField(field)} ${readAnamnesisField(field)}`.trim();
+        header[field] = header[field] ?? [readHeaderField(field), readPageAnamnesisField(field), readAnamnesisField(field)].join(" ").trim();
         return rule.pattern.test(header[field]);
       });
       if (matched) reasons.push(`${rule.reason} (${matched.toLowerCase()})`);
