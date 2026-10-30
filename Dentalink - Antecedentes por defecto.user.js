@@ -563,6 +563,385 @@
     return resultado;
   }
 
+  // ═══ 6. Panel lateral paso a paso ═══════════════════════════════════════
+  const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const detDe = (s, enf) => (s.det[enf] ||= {});
+
+  // Piezas de interfaz; cada una lleva en data-* lo que cambia al pulsarla.
+  const siNo = (s, clave) => `<div class="dlk-an-seg" data-yn="${clave}"><button data-v="no" class="${s[clave] === false ? "dlk-an-on" : ""}">No</button><button data-v="si" class="${s[clave] === true ? "dlk-an-on" : ""}">Sí</button></div>`;
+  const chipsDe = (s, clave, items, extra = "") => `<div class="dlk-an-chips">${items.map((i) => `<button class="dlk-an-chip ${extra} ${s[clave].has(i) ? "dlk-an-on" : ""}" data-set="${clave}" data-v="${esc(i)}">${esc(i)}</button>`).join("")}</div>`;
+  const segmento = (s, clave, items) => `<div class="dlk-an-seg" data-val="${clave}">${items.map((i) => `<button data-v="${esc(i)}" class="${s[clave] === i ? "dlk-an-on" : ""}">${esc(i)}</button>`).join("")}</div>`;
+  const segmentoDet = (s, enf, k, items, multi) => `<div class="dlk-an-seg" data-det="${esc(enf)}" data-k="${k}" ${multi ? "data-multi" : ""}>${items.map((i) => {
+    const v = det(s, enf)[k];
+    const on = multi ? (v || []).includes(i) : v === i;
+    return `<button data-v="${esc(i)}" class="${on ? "dlk-an-on" : ""}">${esc(i)}</button>`;
+  }).join("")}</div>`;
+  const numero = (atributos, valor, placeholder) => `<input type="text" inputmode="decimal" class="dlk-an-num" maxlength="4" ${atributos} value="${esc(valor)}" placeholder="${placeholder}">`;
+  const aviso = (a) => `<div class="dlk-an-alert dlk-an-${a.tipo}"><b>${esc(a.titulo)}</b>${esc(a.texto)}</div>`;
+  const q = (texto, nota = "") => `<div class="dlk-an-q">${texto}${nota ? ` <small>${nota}</small>` : ""}</div>`;
+  // Lo que la ficha ya tenía y el panel no reconoce: se ve, no se pierde.
+  const previosDe = (s, titulo) => (s.previos[titulo]?.length
+    ? `${q("Ya en la ficha", "se conserva")}<div class="dlk-an-chips">${s.previos[titulo].map((p) => `<span class="dlk-an-chip dlk-an-previo">${esc(p)}</span>`).join("")}</div>` : "");
+
+  function tarjetaEnfermedad(s, e) {
+    const cfg = ENF[e];
+    const preguntas = (cfg.preguntas || []).map((p) => q(p.q) + (p.input
+      ? `<div class="dlk-an-row">${numero(`data-detinput="${esc(e)}" data-k="${p.k}"`, det(s, e)[p.k], "7,0")}<span class="dlk-an-hint">${p.input}</span></div>`
+      : segmentoDet(s, e, p.k, p.op, p.multi))).join("");
+    const meds = cfg.meds.length ? q("¿Qué toma para esto?", "se pasa a Medicamentos") +
+      `<div class="dlk-an-chips">${cfg.meds.map((m) => `<button class="dlk-an-chip ${s.meds.has(m) ? "dlk-an-on" : ""}" data-med="${esc(m)}" data-from="${esc(e)}">${esc(m)}</button>`).join("")}</div>` : "";
+    return `<div class="dlk-an-sub"><h6>${esc(e)}</h6>${preguntas}${meds}</div>`;
+  }
+
+  const PASOS = [
+    { titulo: "Motivo y enfermedad actual",
+      resumen: (s) => [...s.motivos].join(", ") || (s.previos["Motivo de consulta"] || [])[0] || "",
+      cuerpo: (s) => `${previosDe(s, "Motivo de consulta")}${previosDe(s, "Enfermedad actual")}
+        ${q("¿A qué viene?")}
+        <div class="dlk-an-chips">${MOTIVOS.map((m) => `<button class="dlk-an-chip ${s.motivos.has(m.t) ? "dlk-an-on" : ""}" data-motivo="${esc(m.t)}">${esc(m.t)}</button>`).join("")}</div>
+        ${q("En sus palabras", "opcional")}
+        <input type="text" class="dlk-an-text" data-text="motivoTexto" value="${esc(s.motivoTexto)}" placeholder="me sangran las encías al cepillarme">
+        ${q("¿Qué más nota?")}${chipsDe(s, "sintomas", SINTOMAS)}
+        ${q("¿Desde hace cuánto?")}${segmento(s, "tiempo", TIEMPOS)}
+        <div class="dlk-an-preview">${esc(enfermedadActual(s))}</div>` },
+
+    { titulo: "Alertas: alergias, embarazo, profilaxis",
+      resumen: (s) => (s.alertas === false ? "Niega" : [...s.alergias, s.embarazo, s.profilaxis.size ? "profilaxis" : ""].filter(Boolean).join(", ")),
+      cuerpo: (s) => `${q("¿Alergias, embarazo o le han dicho que necesita antibiótico antes del odontólogo?")}${siNo(s, "alertas")}
+        <div class="dlk-an-more ${s.alertas ? "dlk-an-show" : ""}">
+          ${q("Alergias")}${chipsDe(s, "alergias", ALERGIAS.map((a) => a.t))}
+          ${ALERGIAS.filter((a) => a.alt && s.alergias.has(a.t)).map((a) => `<div class="dlk-an-alert dlk-an-info"><b>Alergia a ${esc(a.t.toLowerCase())}</b>${esc(a.alt)}.</div>`).join("")}
+          ${q("Embarazo o lactancia")}${segmento(s, "embarazo", ["Embarazo", "Lactancia"])}
+          ${s.embarazo === "Embarazo" ? `<div class="dlk-an-row">${numero('data-text="semanas" data-int', s.semanas, "20")}<span class="dlk-an-hint">semanas</span></div>` : ""}
+          ${q("Profilaxis antibiótica por…")}${chipsDe(s, "profilaxis", PROFILAXIS)}
+        </div>${previosDe(s, "Alertas médicas")}` },
+
+    { titulo: "Enfermedades",
+      resumen: (s) => (s.enf === false ? "Niega" : [...s.enfermedades].map((e) => ENF[e].corto || e).join(", ")),
+      cuerpo: (s) => {
+        const comunes = Object.keys(ENF).filter((e) => ENF[e].comun);
+        const otras = Object.keys(ENF).filter((e) => !ENF[e].comun);
+        return `${q("¿Tiene alguna enfermedad diagnosticada?")}${siNo(s, "enf")}
+        <div class="dlk-an-more ${s.enf ? "dlk-an-show" : ""}">
+          ${q("Las más frecuentes")}
+          <div class="dlk-an-tiles">${comunes.map((e) => `<button class="dlk-an-tile ${s.enfermedades.has(e) ? "dlk-an-on" : ""}" data-enf="${esc(e)}">${esc(e)}<small>${esc(ENF[e].meds.slice(0, 2).join(", "))}</small></button>`).join("")}</div>
+          ${q("Otras")}
+          <div class="dlk-an-chips">${otras.map((e) => `<button class="dlk-an-chip ${s.enfermedades.has(e) ? "dlk-an-on" : ""}" data-enf="${esc(e)}">${esc(e)}</button>`).join("")}</div>
+          ${[...s.enfermedades].map((e) => tarjetaEnfermedad(s, e)).join("")}
+          ${avisos(s).filter((a) => /Diabetes|HbA1c|HTA|osteonecrosis/i.test(a.titulo)).map(aviso).join("")}
+        </div>${previosDe(s, "Enfermedades")}`;
+      } },
+
+    { titulo: "Medicamentos",
+      resumen: (s) => (s.med === false ? "Niega" : [...s.meds].join(", ")),
+      cuerpo: (s) => {
+        const anotados = [...s.meds];
+        const sugeridos = [...new Set([...s.enfermedades].flatMap((e) => ENF[e].meds))].filter((m) => !s.meds.has(m));
+        const frecuentes = MEDS_FRECUENTES.filter((m) => !s.meds.has(m) && !sugeridos.includes(m));
+        return `${q("¿Toma algún medicamento de forma habitual?")}${siNo(s, "med")}
+        <div class="dlk-an-more ${s.med ? "dlk-an-show" : ""}">
+          ${anotados.length ? q("Ya anotados") + `<div class="dlk-an-chips">${anotados.map((m) => `<button class="dlk-an-chip dlk-an-on" data-med="${esc(m)}">${esc(m)}${s.medDesde[m] ? `<span class="dlk-an-from">· ${esc(ENF[s.medDesde[m]]?.corto || s.medDesde[m])}</span>` : ""}</button>`).join("")}</div>` : ""}
+          ${sugeridos.length ? q("Por sus enfermedades") + `<div class="dlk-an-chips">${sugeridos.map((m) => `<button class="dlk-an-chip dlk-an-sug" data-med="${esc(m)}">${esc(m)}</button>`).join("")}</div>` : ""}
+          ${q("Frecuentes")}<div class="dlk-an-chips">${frecuentes.map((m) => `<button class="dlk-an-chip" data-med="${esc(m)}">${esc(m)}</button>`).join("")}</div>
+          ${q("Buscar otro")}
+          <div class="dlk-an-row"><input type="text" class="dlk-an-text" id="dlk-an-med-otro" list="dlk-an-meds" placeholder="Escribe: alen… warf… predn…"><button class="dlk-an-chip" data-an="med-add">Agregar</button></div>
+          ${avisos(s).filter((a) => !/Diabetes|HbA1c|HTA|Embarazo|profilaxis/i.test(a.titulo)).map(aviso).join("")}
+        </div>${previosDe(s, "Medicamentos")}`;
+      } },
+
+    { titulo: "Hábitos",
+      resumen: (s) => (s.tabaco === "No" && !habitosFinales(s).length ? "Niega" : habitosFinales(s).join(", ")),
+      cuerpo: (s) => `${q("¿Fuma o consume algo?")}${segmento(s, "tabaco", ["No", "Fuma", "Exfumador"])}
+        ${s.tabaco === "Fuma" ? `<div class="dlk-an-sub">
+          ${q("¿Qué?")}${chipsDe(s, "fuma", FUMA)}
+          ${s.fuma.has("Cigarrillo") ? q("Cigarrillos al día") + segmento(s, "cantidad", CANTIDAD) + q("¿Desde hace cuánto?") + segmento(s, "anios", ANIOS) : ""}
+          ${s.fuma.has("Cannabis") ? q("Cannabis, ¿con qué frecuencia?") + segmento(s, "cannabisFrec", FRECUENCIA) : ""}
+          ${s.fuma.has("Vapeador") ? q("Vapeador, ¿con qué frecuencia?") + segmento(s, "vapeoFrec", FRECUENCIA) : ""}
+          ${gradoTabaco(s) ? `<div class="dlk-an-alert dlk-an-warn"><b>Tabaco → grado ${gradoTabaco(s)}</b>Factor modificador de la periodontitis.</div>` : ""}
+          ${s.fuma.has("Cannabis") ? `<div class="dlk-an-alert dlk-an-info"><b>Cannabis</b>También se asocia a mayor pérdida de inserción.</div>` : ""}
+        </div>` : ""}
+        ${s.tabaco === "Exfumador" ? `<div class="dlk-an-sub">${q("¿Hace cuánto dejó?")}${segmento(s, "dejo", DEJO)}</div>` : ""}
+        ${q("¿Alcohol?")}${segmento(s, "alcohol", ["No", ...FRECUENCIA])}
+        ${q("¿Aprieta o rechina los dientes?")}${segmento(s, "bruxismo", ["No", "Sí"])}
+        ${s.bruxismo === "Sí" ? `<div class="dlk-an-sub">${q("¿Cuándo?")}${chipsDe(s, "bruxTipo", ["Nocturno", "Diurno"])}${q("¿Usa placa?")}${segmento(s, "placa", ["Sí", "No"])}</div>` : ""}
+        ${q("Otros")}${chipsDe(s, "otrosHab", OTROS_HAB)}${previosDe(s, "Hábitos")}` },
+
+    { titulo: "Antecedentes odontológicos e higiene",
+      resumen: (s) => [[...s.odontologicos].join(", "), s.cepillado && `cepillado ${s.cepillado}/día`].filter(Boolean).join(" · "),
+      cuerpo: (s) => `${q("Tratamientos anteriores")}${chipsDe(s, "odontologicos", ODONTO)}
+        ${s.odontologicos.has("Exodoncias por movilidad") ? `<div class="dlk-an-alert dlk-an-warn"><b>Pérdida dental por periodontitis</b>Dato clave para el estadio.</div>` : ""}
+        ${q("Última limpieza")}${segmento(s, "limpieza", LIMPIEZA)}
+        ${q("¿Cuántas veces se cepilla al día?")}${segmento(s, "cepillado", ["1", "2", "3", "> 3"])}
+        <div class="dlk-an-row">${q("¿Seda?")}${segmento(s, "seda", ["Sí", "No"])}${q("¿Enjuague?")}${segmento(s, "enjuague", ["Sí", "No"])}</div>
+        ${previosDe(s, "Antecedentes odontológicos")}` },
+
+    { titulo: "Antecedentes familiares",
+      resumen: (s) => (s.fam === false ? "Niega" : [...s.familiares].join(", ")),
+      cuerpo: (s) => `${q("¿En la familia hay periodontitis, pérdida temprana de dientes o diabetes?")}${siNo(s, "fam")}
+        <div class="dlk-an-more ${s.fam ? "dlk-an-show" : ""}">${q("¿Cuáles?")}${chipsDe(s, "familiares", FAMILIARES)}</div>
+        ${previosDe(s, "Antecedentes familiares")}` },
+
+    { titulo: "Revisión final",
+      resumen: () => "",
+      cuerpo: (s) => {
+        const asa = asaSugerido(s);
+        const fila = (t, v) => `<dt>${t}</dt><dd>${esc(v)}</dd>`;
+        return `<div class="dlk-an-alert dlk-an-ok"><b>${esc(asa.asa)} sugerido</b>${esc(asa.why)}</div>
+        ${avisos(s).map(aviso).join("")}
+        <dl class="dlk-an-sum">
+          ${fila("Motivo", motivoFinal(s) || (s.previos["Motivo de consulta"] || []).join(", ") || "—")}
+          ${fila("Enfermedad actual", (s.previos["Enfermedad actual"] || [])[0] || enfermedadActual(s))}
+          ${fila("Alertas", [asa.asa, ...alertasFinales(s)].join(" · "))}
+          ${fila("Enfermedades", enfermedadesFinales(s).join(", ") || "NIEGA")}
+          ${fila("Medicamentos", up([...s.meds].join(", ")) || "NIEGA")}
+          ${fila("Hábitos", habitosFinales(s).join(", ") || "NIEGA")}
+          ${fila("Odontológicos", [up([...s.odontologicos].join(", ")), higiene(s)].filter(Boolean).join(". ") || "—")}
+          ${fila("Familiares", up([...s.familiares].join(", ")) || "NIEGA")}
+        </dl>
+        <div class="dlk-an-hint">Se escribe en la ficha al pulsar «Pasar a Dentalink». Lo que ya estaba y no se reconoce se conserva.</div>`;
+      } }
+  ];
+
+  function htmlPanel(s, abierto, plegado) {
+    if (plegado) return `<button class="dlk-an-pestana" data-an="abrir">Anamnesis</button>`;
+    const ultimo = PASOS.length - 1;
+    const pasos = PASOS.map((p, i) => {
+      const hecho = s.hechos.has(i);
+      return `<div class="dlk-an-step ${i === abierto ? "dlk-an-open" : ""} ${hecho ? "dlk-an-done" : ""}" data-i="${i}">
+        <div class="dlk-an-step-h" data-paso="${i}"><div class="dlk-an-num-paso">${hecho ? "✓" : i + 1}</div>
+          <div class="dlk-an-step-t"><b>${p.titulo}</b><span>${esc(p.resumen(s) || (hecho ? "" : "Pendiente"))}</span></div></div>
+        ${i === abierto ? `<div class="dlk-an-step-b">${p.cuerpo(s)}${i < ultimo ? `<button class="dlk-an-next" data-an="siguiente">Siguiente</button>` : ""}</div>` : ""}
+      </div>`;
+    }).join("");
+    return `<aside class="dlk-an-panel">
+      <div class="dlk-an-head"><div><b>Anamnesis paso a paso</b>
+        <div class="dlk-an-hint">${abierto === ultimo ? "Revisa y pasa a la ficha" : `Paso ${abierto + 1} de ${PASOS.length}`}</div></div>
+        <button class="dlk-an-plegar" data-an="plegar" title="Plegar">→</button></div>
+      <div class="dlk-an-progress"><i style="width:${(s.hechos.size / ultimo) * 100}%"></i></div>
+      <div class="dlk-an-steps">${pasos}</div>
+      <div class="dlk-an-foot"><button class="dlk-an-go" data-an="pasar" ${abierto === ultimo ? "" : "disabled"}>Pasar a Dentalink</button></div>
+    </aside>`;
+  }
+
+  const PANEL_CSS = `
+    #dlk-an-raiz { --an-blue:#2a6fdb; --an-line:#e3e7ec; --an-muted:#8a919c; font:13px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; color:#2b2f36; }
+    #dlk-an-raiz *, #dlk-an-raiz *::before { box-sizing:border-box; }
+    .dlk-an-panel { position:fixed; right:0; top:0; height:100vh; width:460px; z-index:1040; background:#fff; border-left:1px solid var(--an-line);
+      box-shadow:-6px 0 16px rgba(0,0,0,.08); display:flex; flex-direction:column; }
+    .dlk-an-pestana { position:fixed; right:0; top:40%; z-index:1040; width:32px; padding:14px 0; writing-mode:vertical-rl; transform:rotate(180deg);
+      background:var(--an-blue); color:#fff; border:0; border-radius:0 8px 8px 0; font:600 12px/1 inherit; cursor:pointer; box-shadow:-2px 0 8px rgba(0,0,0,.15); }
+    .dlk-an-head { display:flex; justify-content:space-between; align-items:flex-start; padding:14px 16px 8px; }
+    .dlk-an-head b { font-size:15px; }
+    .dlk-an-plegar { border:1px solid #cfd5dd; background:#fff; border-radius:6px; padding:2px 9px; cursor:pointer; font:inherit; }
+    .dlk-an-progress { height:4px; background:#eef0f3; margin:0 16px 8px; border-radius:2px; overflow:hidden; }
+    .dlk-an-progress i { display:block; height:100%; background:var(--an-blue); transition:width .25s; }
+    .dlk-an-steps { flex:1; overflow:auto; border-top:1px solid var(--an-line); }
+    .dlk-an-step { border-bottom:1px solid #f0f2f5; }
+    .dlk-an-step-h { display:flex; align-items:center; gap:10px; padding:10px 16px; cursor:pointer; }
+    .dlk-an-num-paso { width:22px; height:22px; border-radius:50%; background:#cfd5dd; color:#fff; font-size:11px; font-weight:700; display:grid; place-items:center; flex:none; }
+    .dlk-an-open .dlk-an-num-paso { background:var(--an-blue); }
+    .dlk-an-done .dlk-an-num-paso { background:#1e7e34; }
+    .dlk-an-step-t { flex:1; min-width:0; }
+    .dlk-an-step-t b { display:block; }
+    .dlk-an-step-t span { display:block; color:var(--an-muted); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .dlk-an-step-b { padding:2px 16px 14px 48px; }
+    .dlk-an-q { font-weight:600; margin:12px 0 6px; font-size:12px; }
+    .dlk-an-q small { font-weight:400; color:var(--an-muted); }
+    .dlk-an-seg { display:inline-flex; flex-wrap:wrap; border:1px solid #cfd5dd; border-radius:6px; overflow:hidden; }
+    .dlk-an-seg button { border:0; background:#fff; padding:5px 12px; font:inherit; font-size:12px; cursor:pointer; color:#2b2f36; }
+    .dlk-an-seg button + button { border-left:1px solid #cfd5dd; }
+    .dlk-an-seg button.dlk-an-on { background:var(--an-blue); color:#fff; }
+    .dlk-an-chips { display:flex; flex-wrap:wrap; gap:6px; }
+    .dlk-an-chip { border:1px solid #cfd5dd; background:#fff; border-radius:999px; padding:4px 10px; font:inherit; font-size:12px; cursor:pointer; color:#2b2f36; }
+    .dlk-an-chip.dlk-an-on { background:var(--an-blue); border-color:var(--an-blue); color:#fff; }
+    .dlk-an-chip.dlk-an-sug { border-style:dashed; border-color:#e0a43a; color:#a86400; background:#fff6e5; }
+    .dlk-an-chip.dlk-an-previo { background:#eef0f3; border-color:#eef0f3; color:#5f6672; cursor:default; }
+    .dlk-an-from { font-size:10px; opacity:.8; margin-left:4px; }
+    .dlk-an-tiles { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+    .dlk-an-tile { border:1px solid #cfd5dd; border-radius:8px; background:#fff; padding:8px 6px; font:inherit; font-size:12px; font-weight:600; cursor:pointer; color:#2b2f36; }
+    .dlk-an-tile small { display:block; font-weight:400; color:var(--an-muted); font-size:10px; }
+    .dlk-an-tile.dlk-an-on { border-color:var(--an-blue); background:#eef3fb; color:#1d4fa3; box-shadow:inset 0 0 0 1px var(--an-blue); }
+    .dlk-an-sub { border:1px solid var(--an-line); border-left:3px solid var(--an-blue); border-radius:6px; padding:2px 10px 10px; margin-top:8px; background:#fbfcfe; }
+    .dlk-an-sub h6 { margin:8px 0 0; font-size:12px; color:#1d4fa3; }
+    .dlk-an-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px; }
+    .dlk-an-row .dlk-an-q { margin:0; }
+    .dlk-an-text, .dlk-an-num { border:1px solid #cfd5dd; border-radius:5px; padding:5px 8px; font:inherit; font-size:12px; }
+    .dlk-an-text { width:100%; }
+    .dlk-an-row .dlk-an-text { flex:1; width:auto; }
+    .dlk-an-num { width:64px; text-align:right; }
+    .dlk-an-more { display:none; }
+    .dlk-an-more.dlk-an-show { display:block; }
+    .dlk-an-hint { color:var(--an-muted); font-size:11px; margin-top:4px; }
+    .dlk-an-alert { border-radius:6px; padding:7px 10px; font-size:12px; margin-top:8px; }
+    .dlk-an-alert b { display:block; }
+    .dlk-an-warn { background:#fff6e5; color:#7a5200; border:1px solid #f1d9a8; }
+    .dlk-an-danger { background:#fdecea; color:#b3261e; border:1px solid #f4c7c3; }
+    .dlk-an-ok { background:#e6f4ea; color:#1e7e34; border:1px solid #bfe3c8; }
+    .dlk-an-info { background:#eef3fb; color:#1d4fa3; border:1px solid #cfe0fb; }
+    .dlk-an-preview { background:#f7f8fa; border:1px solid var(--an-line); border-radius:6px; padding:8px 10px; font-size:11px; margin-top:8px; }
+    .dlk-an-next { margin-top:12px; background:var(--an-blue); color:#fff; border:0; border-radius:6px; padding:7px 14px; font:inherit; font-weight:600; cursor:pointer; }
+    .dlk-an-foot { border-top:1px solid var(--an-line); padding:12px 16px; }
+    .dlk-an-go { width:100%; background:var(--an-blue); color:#fff; border:0; border-radius:6px; padding:9px; font:inherit; font-weight:700; cursor:pointer; }
+    .dlk-an-go:disabled { background:#b9c7dc; cursor:default; }
+    .dlk-an-sum dt { font-weight:600; font-size:11px; color:var(--an-muted); text-transform:uppercase; margin-top:8px; }
+    .dlk-an-sum dd { margin:2px 0 0; font-size:12px; }
+  `;
+
+  // Estado del panel montado en la página.
+  const panel = { estado: null, abierto: 0, plegado: true, raiz: null, ocupado: false };
+
+  function pintar() {
+    if (!panel.raiz || !panel.estado) return;
+    const pasos = panel.raiz.querySelector(".dlk-an-steps");
+    const scroll = pasos ? pasos.scrollTop : 0;
+    panel.raiz.innerHTML = htmlPanel(panel.estado, panel.abierto, panel.plegado) +
+      `<datalist id="dlk-an-meds">${MEDS_TODOS.map((m) => `<option value="${esc(m)}">`).join("")}</datalist>`;
+    const nuevos = panel.raiz.querySelector(".dlk-an-steps");
+    if (nuevos) nuevos.scrollTop = scroll;
+  }
+
+  function montarPanel(s, { plegado }) {
+    if (!document.getElementById("dlk-an-css")) {
+      const style = document.createElement("style");
+      style.id = "dlk-an-css";
+      style.textContent = PANEL_CSS;
+      document.head.appendChild(style);
+    }
+    if (!panel.raiz) {
+      panel.raiz = document.createElement("div");
+      panel.raiz.id = "dlk-an-raiz";
+      panel.raiz.addEventListener("click", alPulsar);
+      panel.raiz.addEventListener("input", alEscribir);
+      panel.raiz.addEventListener("change", (e) => { if (e.target.classList.contains("dlk-an-num")) pintar(); });
+      panel.raiz.addEventListener("keydown", alTeclear);
+      document.body.appendChild(panel.raiz);
+    }
+    panel.estado = s;
+    panel.plegado = plegado;
+    panel.abierto = [...PASOS.keys()].find((i) => !s.hechos.has(i)) ?? PASOS.length - 1;
+    pintar();
+  }
+
+  function desmontarPanel() {
+    panel.raiz?.remove();
+    panel.raiz = null;
+    panel.estado = null;
+  }
+
+  function alternarPanel(abrir) {
+    panel.plegado = !abrir;
+    pintar();
+  }
+
+  function avanzar() {
+    panel.estado.hechos.add(panel.abierto);
+    panel.abierto = Math.min(panel.abierto + 1, PASOS.length - 1);
+  }
+
+  function alternarMed(s, med, desde) {
+    if (s.meds.has(med)) { s.meds.delete(med); delete s.medDesde[med]; return; }
+    s.meds.add(med);
+    if (desde) s.medDesde[med] = desde;
+    s.med = true;
+  }
+
+  async function pasarADentalink() {
+    if (panel.ocupado) return;
+    panel.ocupado = true;
+    const boton = panel.raiz.querySelector(".dlk-an-go");
+    if (boton) { boton.disabled = true; boton.textContent = "Escribiendo en la ficha…"; }
+    try {
+      const plan = planEscritura(panel.estado, leerSecciones());
+      const r = await aplicarPlan(plan, { ruta: location.pathname });
+      if (r.cancelado) return flash("Se salió de la ficha: no se terminó de escribir.");
+      const aTexto = r.aTexto.length ? ` No estaban en la lista (van en «Otros»): ${r.aTexto.join(", ")}.` : "";
+      flash(`Listo en la ficha.${aTexto} Revisa y pulsa Guardar.`);
+    } finally {
+      panel.ocupado = false;
+      pintar();
+    }
+  }
+
+  function alPulsar(e) {
+    const t = e.target.closest("button, [data-paso]");
+    if (!t || !panel.estado) return;
+    e.preventDefault();
+    const s = panel.estado;
+    const accion = t.dataset.an;
+    if (accion === "abrir") return alternarPanel(true);
+    if (accion === "plegar") return alternarPanel(false);
+    if (accion === "siguiente") { avanzar(); return pintar(); }
+    if (accion === "pasar") return pasarADentalink();
+    if (accion === "med-add") {
+      const input = panel.raiz.querySelector("#dlk-an-med-otro");
+      const v = spaces(input?.value);
+      if (v) alternarMed(s, MEDS_TODOS.find((m) => norm(m) === norm(v)) || v[0].toUpperCase() + v.slice(1));
+      return pintar();
+    }
+    if (t.dataset.paso !== undefined) { panel.abierto = Number(t.dataset.paso); return pintar(); }
+    const yn = t.closest("[data-yn]");
+    if (yn) {
+      s[yn.dataset.yn] = t.dataset.v === "si";
+      if (t.dataset.v === "no") avanzar();
+      return pintar();
+    }
+    if (t.dataset.motivo) {
+      const motivo = MOTIVOS.find((m) => m.t === t.dataset.motivo);
+      if (s.motivos.has(motivo.t)) s.motivos.delete(motivo.t);
+      else { s.motivos.add(motivo.t); motivo.sint.forEach((x) => s.sintomas.add(x)); }
+      return pintar();
+    }
+    if (t.dataset.enf) {
+      const enf = t.dataset.enf;
+      if (s.enfermedades.has(enf)) s.enfermedades.delete(enf); else s.enfermedades.add(enf);
+      return pintar();
+    }
+    if (t.dataset.med) { alternarMed(s, t.dataset.med, t.dataset.from); return pintar(); }
+    if (t.dataset.set) {
+      const set = s[t.dataset.set];
+      if (set.has(t.dataset.v)) set.delete(t.dataset.v); else set.add(t.dataset.v);
+      return pintar();
+    }
+    const d = t.closest("[data-det]");
+    if (d) {
+      const o = detDe(s, d.dataset.det);
+      const k = d.dataset.k;
+      const v = t.dataset.v;
+      if (d.hasAttribute("data-multi")) {
+        const arr = o[k] || [];
+        o[k] = arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
+      } else o[k] = o[k] === v ? "" : v;
+      return pintar();
+    }
+    const sv = t.closest("[data-val]");
+    if (sv) {
+      const k = sv.dataset.val;
+      s[k] = s[k] === t.dataset.v ? "" : t.dataset.v;
+      return pintar();
+    }
+  }
+
+  // Mientras escribe solo se limpia el número; los avisos se recalculan al salir del campo.
+  function alEscribir(e) {
+    const el = e.target;
+    const s = panel.estado;
+    if (!s) return;
+    if (el.classList.contains("dlk-an-num")) {
+      let v = el.value.replace(".", ",").replace(el.hasAttribute("data-int") ? /[^0-9]/g : /[^0-9,]/g, "");
+      const [entero, ...decimales] = v.split(",");
+      if (decimales.length) v = `${entero},${decimales.join("").slice(0, 1)}`;
+      if (v !== el.value) el.value = v;
+    }
+    if (el.dataset.text) s[el.dataset.text] = el.value;
+    else if (el.dataset.detinput) detDe(s, el.dataset.detinput)[el.dataset.k] = el.value;
+  }
+
+  function alTeclear(e) {
+    if (e.key !== "Enter") return;
+    if (e.target.id === "dlk-an-med-otro") { e.preventDefault(); panel.raiz.querySelector('[data-an="med-add"]')?.click(); }
+    if (e.target.classList.contains("dlk-an-num")) e.target.blur();
+  }
+
   // ─── Utilidades ─────────────────────────────────────────────────────────
   const STYLE_ID = "dlk-anam-style";
   const TOOLBAR_ATTR = "data-dlk-anam-toolbar";
@@ -1010,7 +1389,7 @@
     globalThis.__dlkAnamTest = {
       addToSection, applyAutoDefaults, getSections, missingSections, norm, present, sinAntecedentes,
       crearEstado, fmt, leerNumero, enfermedadActual, motivoFinal, avisos, gradoTabaco, asaSugerido,
-      alertasFinales, enfermedadesFinales, habitosFinales, higiene, estadoDesdeFicha, fichaVacia, ALIAS, planEscritura, leerSecciones, aplicarPlan
+      alertasFinales, enfermedadesFinales, habitosFinales, higiene, estadoDesdeFicha, fichaVacia, ALIAS, planEscritura, leerSecciones, aplicarPlan, PASOS, htmlPanel, montarPanel, alternarPanel
     };
   }
 
