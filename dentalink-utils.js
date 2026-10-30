@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Utils (base compartida)
 // @namespace    https://odontofamily.local/dentalink-utils
-// @version      1.2.2
+// @version      1.3.0
 // @description  Utilidades compartidas para los scripts de Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/*
@@ -19,13 +19,13 @@
   "use strict";
 
   const existingUtils = window.__dlkUtils;
-  if (existingUtils?.version === "1.2.2"
-    && typeof existingUtils.calculatePeriodontalProgress === "function") return;
+  if (existingUtils?.version === "1.3.0"
+    && typeof existingUtils.getPendingPeriodontalItems === "function") return;
 
   // Amplía una instancia antigua en vez de abandonarla. Esto permite que una
   // copia cacheada cargada por otro userscript no bloquee las funciones nuevas.
   const utils = existingUtils || {};
-  utils.version = "1.2.2";
+  utils.version = "1.3.0";
 
   // ─── DOM helpers ───
 
@@ -482,13 +482,55 @@ Cita 20 min`;
   };
 
   utils.loadPeriodontalProgress = function (patientId) {
+    return utils.loadPeriodontalProgressRecord(patientId)?.progress || null;
+  };
+
+  utils.loadPeriodontalProgressRecord = function (patientId) {
     if (!patientId) return null;
     try {
       const records = JSON.parse(localStorage.getItem(PERIODONTAL_PROGRESS_STORAGE_KEY) || "{}");
-      return records?.[patientId]?.progress || null;
+      const record = records?.[patientId];
+      return record && typeof record === "object" ? record : null;
     } catch (_) {
       return null;
     }
+  };
+
+  utils.mergePeriodontalProgressEvidence = function (base, evidence) {
+    if (!base?.total) {
+      return evidence?.total ? JSON.parse(JSON.stringify(evidence)) : null;
+    }
+
+    let merged = JSON.parse(JSON.stringify(base));
+    if (!evidence?.treatments?.length) return merged;
+
+    evidence.treatments.forEach((treatment) => {
+      if (!treatment?.completed?.length) return;
+      merged = utils.applyPeriodontalCompletion(
+        merged,
+        treatment.key,
+        treatment.completed
+      );
+    });
+    return merged;
+  };
+
+  utils.getPendingPeriodontalItems = function (progress) {
+    if (!progress?.treatments?.length) return [];
+    return PERIODONTAL_TREATMENTS.flatMap((definition) => {
+      const treatment = progress.treatments.find((item) => item.key === definition.key);
+      if (!treatment?.pendingCount) return [];
+      return [{
+        key: definition.key,
+        cups: definition.cups,
+        label: definition.label,
+        shortLabel: definition.shortLabel,
+        scope: definition.scope,
+        color: definition.color,
+        pending: sortedTreatmentItems(treatment.pending || []),
+        pendingCount: treatment.pendingCount
+      }];
+    });
   };
 
   // ─── Centralized URL change watching ───

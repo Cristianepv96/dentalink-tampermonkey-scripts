@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Condensación de evoluciones
 // @namespace    san-jose-ips-odontologica
-// @version      1.0.1
+// @version      1.0.2
 // @description  Resume localmente el avance periodontal en la ficha de evoluciones.
 // @author       Cris
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js
 // @match        https://*.dentalink.cl/*
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.2.1
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.3.0
 // @grant        none
 // @run-at       document-start
 // @noframes

@@ -116,7 +116,7 @@ test("la utilidad nueva amplía una instancia antigua ya cargada", () => {
   const legacyUtils = { legacyMarker: true };
   const utils = loadUtils(legacyUtils);
   assert.equal(utils, legacyUtils);
-  assert.equal(utils.version, "1.2.2");
+  assert.equal(utils.version, "1.3.0");
   assert.equal(typeof utils.calculatePeriodontalProgress, "function");
   assert.equal(utils.legacyMarker, true);
 });
@@ -192,6 +192,63 @@ test("simula el procedimiento actual y genera el estado de paciente controlado",
   assert.equal(completed.pendingCount, 0);
   assert.equal(completed.controlled, true);
   assert.match(note, /Paciente controlado por periodoncia/);
+});
+
+test("devuelve el registro completo de progreso sin romper la carga antigua", () => {
+  const utils = loadUtils();
+  const progress = utils.calculatePeriodontalProgress([
+    "Se solicita autorización para realizar:",
+    "- [240301] Campo cerrado en 16."
+  ].join("\n"));
+
+  utils.savePeriodontalProgress("123", progress, {
+    sourcePath: "/pacientes/123/ficha/evoluciones",
+    scriptVersion: "test"
+  });
+
+  const record = utils.loadPeriodontalProgressRecord("123");
+  assert.deepEqual(utils.loadPeriodontalProgress("123"), record.progress);
+  assert.equal(record.sourcePath, "/pacientes/123/ficha/evoluciones");
+  assert.equal(record.scriptVersion, "test");
+  assert.match(record.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("combina evidencia realizada sin reemplazar el universo de la valoración", () => {
+  const utils = loadUtils();
+  const baseline = utils.calculatePeriodontalProgress([
+    "Se solicita autorización para realizar:",
+    "- [240301] Campo cerrado en 16, 17.",
+    "- [242201] Campo abierto en 47."
+  ].join("\n"));
+  const evidence = utils.calculatePeriodontalProgress([
+    "Acción realizada: [240301] Campo cerrado Pieza 16",
+    "PROCEDIMIENTO: Raspado y Alisado Radicular Campo Cerrado",
+    "Dientes: 16"
+  ].join("\n"));
+
+  const merged = utils.mergePeriodontalProgressEvidence(baseline, evidence);
+  const closed = merged.treatments.find((item) => item.key === "closed");
+  const open = merged.treatments.find((item) => item.key === "open");
+
+  assert.equal(merged.total, 3);
+  assert.deepEqual([...closed.completed], ["16"]);
+  assert.deepEqual([...closed.pending], ["17"]);
+  assert.deepEqual([...open.pending], ["47"]);
+});
+
+test("normaliza los tratamientos pendientes en el orden compartido", () => {
+  const utils = loadUtils();
+  const progress = utils.calculatePeriodontalProgress([
+    "Se solicita autorización para realizar:",
+    "- [242201] Campo abierto en 47, 48.",
+    "- [240301] Campo cerrado en 16, 17."
+  ].join("\n"));
+
+  const pending = utils.getPendingPeriodontalItems(progress);
+  assert.deepEqual(Array.from(pending, (item) => item.key), ["closed", "open"]);
+  assert.deepEqual([...pending[0].pending], ["16", "17"]);
+  assert.equal(pending[0].cups, "240301");
+  assert.equal(pending[0].scope, "tooth");
 });
 
 test("construye la misma valoración compartida a partir del resumen", () => {

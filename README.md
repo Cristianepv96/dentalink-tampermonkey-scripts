@@ -9,6 +9,7 @@ Scripts de [Tampermonkey](https://www.tampermonkey.net/) para automatizar tareas
 |---|---|---|
 | **Condensación de evoluciones** | Resume el avance de siete tratamientos periodontales, diferencia pendientes y realizados por pieza y conserva el estado por paciente. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Condensaci%C3%B3n%20de%20evoluciones.user.js) |
 | **Evoluciones periodoncia** | Genera valoraciones y evoluciones clínicas, precarga piezas pendientes y agrega el tratamiento restante o el estado de paciente controlado. Puede incorporar la Ficha Anamnesis. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Evoluciones%20periodoncia.user.js) |
+| **Plan periodontal asistido** | Actualiza los pendientes desde Evoluciones, permite escoger procedimientos y piezas de la cita y crea un único plan con sus prestaciones, sin evolucionarlas ni finalizarlas. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Plan%20periodontal%20asistido.user.js) |
 | **Autollenado orden de servicio** | Rellena automáticamente los campos base de la orden y completa los borradores generados desde el periodontograma con CUPS, cantidad, indicaciones y justificación clínica. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js) |
 | **Autollenado certificado de incapacidad** | Completa el certificado de periodoncia, incluida la transcripción, el origen por enfermedad general y el profesional. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20certificado%20de%20incapacidad.user.js) |
 | **Antecedentes por defecto** | Anamnesis rápida: pone comillas en el motivo y el inicio de la enfermedad actual, agrega el botón **Sin antecedentes** (ASA I / NIEGA en campos vacíos, con Deshacer), botones por enfermedad (HTA, dislipidemia, diabetes, hipotiroidismo) que resaltan sus medicamentos, y casillas de antecedentes odontológicos. No guarda: revise y pulse Guardar. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js) |
@@ -160,8 +161,28 @@ tratamientos complementarios. Cada evolución generada muestra los
 procedimientos que continúan pendientes; cuando se completa el plan agrega
 **“Paciente controlado por periodoncia”**.
 
-Para obtener el estado más reciente, abra la ficha **Evoluciones** del paciente
-antes de generar una nueva evolución desde otro apartado de Dentalink.
+### Creación asistida de planes periodontales
+
+El script **Plan periodontal asistido** agrega el botón **Preparar plan
+periodontal** en **Evoluciones** y **Planes de tratamiento**. Si se inicia desde
+Planes, abre temporalmente Evoluciones para actualizar el historial del
+especialista y regresa automáticamente.
+
+El asistente comienza sin piezas seleccionadas. Permite escoger una parte de
+los pendientes o seleccionar una categoría completa y propone un nombre como
+`10-08-2026 CRISTIAN PEÑA - RAR CERRADO / RAR ABIERTO`. Después de confirmar,
+crea el plan mediante los controles visibles de Dentalink y carga una fila por
+procedimiento y pieza; la frenillectomía se carga sin pieza.
+
+Si Dentalink interrumpe el proceso, el panel ofrece **Reanudar** o **Cancelar
+automatización**. La reanudación verifica las filas existentes y no las duplica.
+Cancelar elimina únicamente el estado del asistente: no borra el plan ni sus
+prestaciones. Los procedimientos cargados por el asistente quedan registrados
+localmente y se muestran como **Ya cargado en plan #…** en selecciones futuras.
+
+El asistente se detiene al terminar la carga administrativa. La evolución
+clínica, realización, facturación y finalización continúan a cargo del flujo
+normal y de **Evoluciones periodoncia**.
 
 ---
 
@@ -172,6 +193,7 @@ antes de generar una nueva evolución desde otro apartado de Dentalink.
 ├── dentalink-medicamentos.js                       # Textos de medicamentos compartidos (@require)
 ├── Dentalink - Evoluciones periodoncia.user.js     # Textos rápidos evoluciones
 ├── Dentalink - Condensación de evoluciones.user.js # Resumen de avances en evoluciones
+├── Dentalink - Plan periodontal asistido.user.js   # Crea planes desde los pendientes
 ├── Dentalink - Autollenado orden de servicio.user.js
 ├── Dentalink - Autollenado certificado de incapacidad.user.js
 ├── Dentalink - Antecedentes por defecto.user.js
@@ -182,7 +204,9 @@ antes de generar una nueva evolución desde otro apartado de Dentalink.
 ├── apps-script/
 │   └── registro-diario.gs
 ├── tests/
-│   └── periodontal-progress.test.js
+│   ├── periodontal-progress.test.js
+│   ├── periodontal-plan-assistant.test.js
+│   └── incapacity-autofill.test.js
 └── README.md
 ```
 
