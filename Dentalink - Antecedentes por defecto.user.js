@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Dentalink - Antecedentes por defecto
 // @namespace    https://odontofamily.local/dentalink-antecedentes
-// @version      2.0.0
+// @version      2.0.1
 // @description  Anamnesis rápida: textos base, botón "Sin antecedentes", botones por enfermedad y medicamentos, y casillas de antecedentes odontológicos.
 // @author       Cris
-// @match        https://*.dentalink.cl/pacientes/*/ficha/antecedentes*
+// @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js
 // @grant        none
@@ -71,7 +71,7 @@
     "Motivo de consulta", "Enfermedad actual", "Alertas médicas", "Enfermedades",
     "Medicamentos", "Hábitos", "Antecedentes odontológicos", "Antecedentes familiares"
   ];
-  const appliedDefaults = new Set(); // "ruta|sección" ya inicializadas
+  const appliedDefaults = new Set(); // "ruta|sección" ya inicializadas en esta visita
   const highlightedMeds = new Set();
   let lastUndo = null;
 
@@ -355,7 +355,7 @@
 
   let lastPath = location.pathname;
   setInterval(() => {
-    if (location.pathname !== lastPath) { lastPath = location.pathname; highlightedMeds.clear(); lastUndo = null; schedule(); }
+    if (location.pathname !== lastPath) { lastPath = location.pathname; appliedDefaults.clear(); highlightedMeds.clear(); lastUndo = null; schedule(); }
   }, 800);
 
   schedule();
