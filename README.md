@@ -12,7 +12,7 @@ Scripts de [Tampermonkey](https://www.tampermonkey.net/) para automatizar tareas
 | **Plan periodontal asistido** | Actualiza los pendientes desde Evoluciones, permite escoger procedimientos y piezas de la cita y crea un único plan con sus prestaciones, sin evolucionarlas ni finalizarlas. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Plan%20periodontal%20asistido.user.js) |
 | **Autollenado orden de servicio** | Rellena automáticamente los campos base de la orden y completa los borradores generados desde el periodontograma con CUPS, cantidad, indicaciones y justificación clínica. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20orden%20de%20servicio.user.js) |
 | **Autollenado certificado de incapacidad** | Completa el certificado de periodoncia, incluida la transcripción, el origen por enfermedad general y el profesional. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Autollenado%20certificado%20de%20incapacidad.user.js) |
-| **Antecedentes por defecto** | Anamnesis rápida: pone comillas en el motivo y el inicio de la enfermedad actual, agrega el botón **Sin antecedentes** (ASA I / NIEGA en campos vacíos, con Deshacer), botones por enfermedad (HTA, dislipidemia, diabetes, hipotiroidismo) que resaltan sus medicamentos, y casillas de antecedentes odontológicos. Los botones marcan la lista de Dentalink cuando el elemento existe ahí (si no, lo escriben en «Otros…»), respeta lo ya elegido en las listas y muestra qué secciones faltan. No guarda: revise y pulse Guardar. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js) |
+| **Antecedentes por defecto** | Anamnesis paso a paso: panel lateral de 8 pasos que sigue la entrevista (motivo, alertas, enfermedades, medicamentos, hábitos, antecedentes odontológicos e higiene, familiares y revisión). Propone los medicamentos de cada enfermedad, avisa riesgos (anticoagulantes, antirresortivos, glicada ≥ 7,5 %, tabaco), sugiere el ASA y escribe la ficha en las listas de Dentalink. En pacientes que vuelven parte de lo ya registrado para confirmar y corregir. No guarda: revise y pulse Guardar. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Antecedentes%20por%20defecto.user.js) |
 | **Botones receta rápida** | Botones para insertar recetas predefinidas (Naproxeno, Amoxicilina, Azitromicina, Interproximal, Perioaid). No repite un medicamento que ya está en la receta y marca en rojo, con doble clic para confirmar, los botones que chocan con las alertas del paciente (alergias, anticoagulantes, enfermedad renal, embarazo). | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Botones%20receta%20rapida.user.js) |
 | **CUPS rápido** | Panel flotante con códigos CUPS comunes (SAVIA SALUD y FOMAG) para insertar rápidamente en la orden de servicio. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20CUPS%20rapido%20orden%20de%20servicio.user.js) |
 | **Resumen periodontograma** | Genera el resumen clínico y abre órdenes de servicio listas para campo cerrado, campo abierto y drenaje. La movilidad queda como hallazgo, sin solicitar ajuste oclusal automáticamente. | [⬇️ Instalar](https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Resumen%20periodontograma.user.js) |
@@ -160,6 +160,23 @@ La valoración identifica cada solicitud con su código CUPS y permite agregar
 tratamientos complementarios. Cada evolución generada muestra los
 procedimientos que continúan pendientes; cuando se completa el plan agrega
 **“Paciente controlado por periodoncia”**.
+
+### Anamnesis paso a paso
+
+En **Ficha Anamnesis** aparece un panel a la derecha. Con la ficha vacía se
+abre solo; si ya tiene datos queda como una pestaña **Anamnesis** en el borde,
+y al abrirla muestra lo registrado para confirmar o corregir.
+
+Cada paso empieza con una pregunta de sí o no; «No» lo da por respondido.
+Al elegir una enfermedad aparecen su seguimiento (por ejemplo, si la HTA está
+controlada o la última glicada) y sus medicamentos habituales. Los avisos
+clínicos y el ASA sugerido se ven en la revisión final.
+
+**Pasar a Dentalink** marca cada elemento en la lista de su sección; lo que no
+existe en la lista va al texto «Otros …». Nunca crea elementos nuevos en el
+catálogo de la clínica, nunca escribe «NIEGA» donde ya hay datos y solo quita
+lo que se desmarcó en el panel. La ficha no se guarda: revise y pulse
+**Guardar**.
 
 ### Creación asistida de planes periodontales
 
