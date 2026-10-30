@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Antecedentes por defecto
 // @namespace    https://odontofamily.local/dentalink-antecedentes
-// @version      3.0.0
+// @version      3.0.1
 // @description  Anamnesis paso a paso: panel lateral que guía la entrevista, avisa riesgos periodontales y escribe la Ficha Anamnesis en las listas de Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -529,7 +529,8 @@
 
       if (titulo === "Motivo de consulta" || titulo === "Enfermedad actual") {
         const propio = titulo === "Motivo de consulta" ? motivoFinal(s) : enfermedadActual(s);
-        plan[titulo] = { marcar: [], quitar: [], alias: {}, texto: actual.length ? spaces(seccion.texto) : propio };
+        // Si ya tiene algo (texto o etiqueta de su lista), no se toca.
+        plan[titulo] = { marcar: [], quitar: [], alias: {}, texto: actual.length || lista.length ? spaces(seccion.texto) : propio };
         continue;
       }
 
@@ -561,7 +562,9 @@
       nuevos.forEach(agregar);
 
       const hayDatos = quedan.length + marcar.length + partes.length > 0;
-      lista.filter((etiqueta) => NADA.test(norm(etiqueta))).forEach((etiqueta) => { if (hayDatos) quitar.push(etiqueta); });
+      // El ASA no es una alerta: no contradice «NO ALERGIA».
+      const hayAlertas = quedan.length + marcar.length + partes.filter((t) => !/^ASA\b/.test(norm(t))).length > 0;
+      lista.filter((etiqueta) => NADA.test(norm(etiqueta))).forEach((etiqueta) => { if (hayAlertas) quitar.push(etiqueta); });
       const niegaAhora = SECCION_PASO[titulo].clave ? s[SECCION_PASO[titulo].clave] === false
         : titulo === "Hábitos" && s.tabaco === "No";
       const yaNiega = lista.some((e) => NADA.test(norm(e))) || actual.some((t) => NADA.test(norm(t)));

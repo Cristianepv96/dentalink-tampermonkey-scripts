@@ -7,7 +7,7 @@ const FICHA = "/pacientes/7/ficha/antecedentes";
 test("se instala en todas las páginas del paciente", () => {
   const texto = source();
   assert.equal(texto.match(/@match\s+(\S+)/)[1], "https://*.dentalink.cl/pacientes/*");
-  assert.equal(texto.match(/@version\s+(\S+)/)[1], "3.0.0");
+  assert.equal(texto.match(/@version\s+(\S+)/)[1], "3.0.1");
 });
 
 test("ficha vacía abre el panel; con datos queda plegado", () => {

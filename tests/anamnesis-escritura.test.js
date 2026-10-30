@@ -58,3 +58,25 @@ test("no pisa un motivo ya escrito", () => {
   s.motivos.add("Dientes flojos");
   assert.equal(api.planEscritura(s, ficha)["Motivo de consulta"].texto, "DOLOR");
 });
+
+test("no escribe enfermedad actual ni motivo si ya los tiene como etiqueta", () => {
+  const ficha = {
+    "Motivo de consulta": { lista: ["\" tengo una muela floja \""], texto: "" },
+    "Enfermedad actual": { lista: ["Paciente asiste a cita odontológica"], texto: "" }
+  };
+  const s = api.estadoDesdeFicha(ficha);
+  const plan = api.planEscritura(s, ficha);
+  assert.equal(plan["Motivo de consulta"].texto, "");
+  assert.equal(plan["Enfermedad actual"].texto, "");
+});
+
+test("el ASA no hace quitar la etiqueta NO ALERGIA", () => {
+  const ficha = {
+    "Alertas médicas": { lista: ["NO ALERGIA"], texto: "" },
+    Enfermedades: { lista: ["hipertensión"], texto: "" }
+  };
+  const s = api.estadoDesdeFicha(ficha);
+  const plan = api.planEscritura(s, ficha);
+  assert.deepEqual([...plan["Alertas médicas"].quitar], []);
+  assert.equal(plan["Alertas médicas"].texto, "ASA II, CONTROLADA POR MEDICAMENTOS");
+});
