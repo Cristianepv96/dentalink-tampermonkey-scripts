@@ -459,6 +459,68 @@
   // Paciente nuevo: ninguna sección tiene nada (las comillas del motivo no cuentan).
   const fichaVacia = (secciones) => Object.values(secciones).every((seccion) => !partesDe(seccion).length);
 
+  // ═══ 4. Plan de escritura: qué marcar, qué quitar y qué texto dejar ══════
+  // Lista de cada sección: catálogo donde buscar y conjunto del estado.
+  const LISTAS = {
+    "Enfermedades": { catalogo: () => Object.keys(ENF), estado: (s) => s.enfermedades, reconocer: (p) => empiezaCon(Object.keys(ENF), p) },
+    "Medicamentos": { catalogo: () => MEDS_TODOS, estado: (s) => s.meds },
+    "Antecedentes odontológicos": { catalogo: () => ODONTO, estado: (s) => s.odontologicos },
+    "Antecedentes familiares": { catalogo: () => FAMILIARES, estado: (s) => s.familiares }
+  };
+
+  // El texto «Otros …» se reconstruye: lo no reconocido de antes + lo que dice el panel.
+  function textoDe(titulo, s) {
+    switch (titulo) {
+      case "Alertas médicas": return [asaSugerido(s).asa, ...alertasFinales(s)];
+      case "Enfermedades": // solo los detalles que la lista no puede guardar
+        return enfermedadesFinales(s).filter((t, i) => !nombres([...s.enfermedades][i]).includes(norm(t)));
+      case "Hábitos": return habitosFinales(s);
+      case "Antecedentes odontológicos": return higiene(s) ? [higiene(s)] : [];
+      default: return [];
+    }
+  }
+
+  function planEscritura(s, ficha) {
+    const plan = {};
+    for (const [titulo, seccion] of Object.entries(ficha)) {
+      const lista = seccion.lista || [];
+      const previos = s.previos[titulo] || [];
+
+      if (titulo === "Motivo de consulta" || titulo === "Enfermedad actual") {
+        const propio = titulo === "Motivo de consulta" ? motivoFinal(s) : enfermedadActual(s);
+        plan[titulo] = { marcar: [], quitar: [], texto: previos.length ? previos.join(", ") : propio };
+        continue;
+      }
+
+      const cfg = LISTAS[titulo];
+      const elegidos = cfg ? [...cfg.estado(s)] : [];
+      const reconocer = cfg?.reconocer || ((p) => cfg && buscar(cfg.catalogo(), p));
+      const quitar = [];
+      const quedan = [];
+      for (const etiqueta of lista) {
+        const p = norm(etiqueta);
+        const item = cfg && reconocer(p);
+        const desmarcado = item && !elegidos.includes(item);
+        const vacia = NADA.test(p) && elegidos.length;
+        if (desmarcado || vacia) quitar.push(etiqueta);
+        else quedan.push(etiqueta);
+      }
+      const marcar = elegidos.filter((item) => !quedan.some((etiqueta) => nombres(item).includes(norm(etiqueta))));
+
+      // Se respeta el orden del texto que ya había; lo nuevo va al final.
+      const nuevos = textoDe(titulo, s);
+      const validos = new Set([...previos, ...nuevos].map(norm));
+      const partes = [];
+      const agregar = (parte) => { if (!partes.some((x) => norm(x) === norm(parte))) partes.push(parte); };
+      String(seccion.texto || "").split(/\s*,\s*/).map(spaces).filter((p) => validos.has(norm(p))).forEach(agregar);
+      [...previos, ...nuevos].forEach(agregar);
+      const listaFinal = quedan.length + marcar.length;
+      if (!partes.length && !listaFinal && SECCION_PASO[titulo]?.paso !== 5) partes.push("NIEGA");
+      plan[titulo] = { marcar, quitar, texto: partes.join(", ") };
+    }
+    return plan;
+  }
+
   // ─── Utilidades ─────────────────────────────────────────────────────────
   const STYLE_ID = "dlk-anam-style";
   const TOOLBAR_ATTR = "data-dlk-anam-toolbar";
@@ -906,7 +968,7 @@
     globalThis.__dlkAnamTest = {
       addToSection, applyAutoDefaults, getSections, missingSections, norm, present, sinAntecedentes,
       crearEstado, fmt, leerNumero, enfermedadActual, motivoFinal, avisos, gradoTabaco, asaSugerido,
-      alertasFinales, enfermedadesFinales, habitosFinales, higiene, estadoDesdeFicha, fichaVacia, ALIAS
+      alertasFinales, enfermedadesFinales, habitosFinales, higiene, estadoDesdeFicha, fichaVacia, ALIAS, planEscritura
     };
   }
 
