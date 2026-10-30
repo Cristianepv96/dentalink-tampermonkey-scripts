@@ -521,6 +521,48 @@
     return plan;
   }
 
+  // ═══ 5. Adaptador de Dentalink: leer y escribir la ficha real ════════════
+  // Cada sección visible: etiquetas elegidas en su lista y texto «Otros …».
+  function leerSecciones() {
+    const secciones = {};
+    for (const [titulo, textarea] of Object.entries(getSections())) {
+      secciones[titulo] = { lista: listItems(sectionCard(textarea)), texto: textarea.value || "" };
+    }
+    return secciones;
+  }
+
+  // Aplica el plan sección por sección. Si se sale de la ficha, se detiene.
+  async function aplicarPlan(plan, { ruta }) {
+    const resultado = { marcados: [], aTexto: [], cancelado: false };
+    const sigue = () => {
+      if (location.pathname !== ruta) resultado.cancelado = true;
+      return !resultado.cancelado;
+    };
+    for (const titulo of TITLES) {
+      const paso = plan[titulo];
+      const textarea = getSections()[titulo];
+      if (!paso || !textarea) continue;
+      const card = sectionCard(textarea);
+      const extra = [];
+      for (const etiqueta of paso.quitar) {
+        if (!sigue()) return resultado;
+        removeFromList(card, etiqueta);
+      }
+      for (const item of paso.marcar) {
+        if (!sigue()) return resultado;
+        if (await pickFromList(card, item)) resultado.marcados.push(item);
+        else { resultado.aTexto.push(item); extra.push(up(item)); }
+      }
+      if (!sigue()) return resultado;
+      const partes = paso.texto ? paso.texto.split(/\s*,\s*/) : [];
+      extra.forEach((parte) => { if (!partes.some((x) => norm(x) === norm(parte))) partes.push(parte); });
+      // Lo que no se encontró en la lista reemplaza un «NIEGA».
+      const texto = (extra.length ? partes.filter((p) => norm(p) !== "NIEGA") : partes).join(", ");
+      if (textarea.value !== texto) setValue(textarea, texto);
+    }
+    return resultado;
+  }
+
   // ─── Utilidades ─────────────────────────────────────────────────────────
   const STYLE_ID = "dlk-anam-style";
   const TOOLBAR_ATTR = "data-dlk-anam-toolbar";
@@ -640,7 +682,7 @@
     const search = panel.querySelector("input:not([type=checkbox])");
     if (search) setInputValue(search, norm(item).slice(0, 6).toLowerCase());
 
-    const wanted = aliases(item);
+    const wanted = [...aliases(item), ...nombres(item)];
     let box = null;
     for (let waited = 0; waited < 3000 && !box; waited += 150) {
       await sleep(150);
@@ -663,7 +705,7 @@
 
   function removeFromList(card, item) {
     const { panel } = listParts(card);
-    const wanted = aliases(item);
+    const wanted = [...aliases(item), ...nombres(item)];
     const icon = [...card.querySelectorAll("i.fa-close")].find((el) => !panel?.contains(el) &&
       el.previousElementSibling?.tagName === "SPAN" && wanted.includes(norm(el.previousElementSibling.textContent)));
     icon?.click();
@@ -968,7 +1010,7 @@
     globalThis.__dlkAnamTest = {
       addToSection, applyAutoDefaults, getSections, missingSections, norm, present, sinAntecedentes,
       crearEstado, fmt, leerNumero, enfermedadActual, motivoFinal, avisos, gradoTabaco, asaSugerido,
-      alertasFinales, enfermedadesFinales, habitosFinales, higiene, estadoDesdeFicha, fichaVacia, ALIAS, planEscritura
+      alertasFinales, enfermedadesFinales, habitosFinales, higiene, estadoDesdeFicha, fichaVacia, ALIAS, planEscritura, leerSecciones, aplicarPlan
     };
   }
 
