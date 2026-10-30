@@ -78,6 +78,245 @@
   const VACIOS = /^(NIEGA|NO REFIERE|NO RELATA|NO|N\/A|NO APLICA)?\.?$/i;
   const SIN_DATO_REAL = /^(ASA I|NIEGA|NO REFIERE|NO RELATA|NO|NO ALERGIA)$/;
 
+  // ═══ 1. Contenido clínico (validado por el periodoncista) ════════════════
+  const MOTIVOS = [
+    { t: "Sangrado de encías", sint: ["Sangrado al cepillado"] },
+    { t: "Dientes flojos", sint: ["Movilidad dental"] },
+    { t: "Remitido por odontología general", sint: [] },
+    { t: "Control periodontal", sint: [] },
+    { t: "Encías retraídas", sint: ["Retracción de encías"] },
+    { t: "Mal aliento", sint: ["Mal aliento"] },
+    { t: "Valoración para implantes", sint: [] },
+    { t: "Valoración antes de ortodoncia", sint: [] }
+  ];
+  const SINTOMAS = ["Sangrado al cepillado", "Encías inflamadas", "Movilidad dental", "Mal aliento", "Sensibilidad dental",
+    "Retracción de encías", "Dolor de encías", "Separación de dientes", "Pus en encías"];
+  const TIEMPOS = ["Semanas", "1 mes", "3 meses", "6 meses", "1 año", "Más de 1 año"];
+
+  // Enfermedades: `comun` sale como tarjeta grande; `meds` alimenta Medicamentos;
+  // `preguntas` es el seguimiento que aparece al elegirla.
+  const ENF = {
+    "Hipertensión": { comun: true, corto: "HTA",
+      meds: ["Losartán", "Amlodipino", "Enalapril", "Hidroclorotiazida", "Valsartán", "Metoprolol"],
+      preguntas: [{ k: "control", q: "¿Está controlada?", op: ["Sí", "No", "No sabe"] }] },
+    "Diabetes": { comun: true, corto: "DM",
+      meds: ["Metformina", "Insulina", "Glibenclamida", "Sitagliptina", "Empagliflozina"],
+      preguntas: [{ k: "tipo", q: "Tipo", op: ["Tipo 2", "Tipo 1"] }, { k: "hba1c", q: "Última hemoglobina glicada", input: "%" }] },
+    "Hipotiroidismo": { comun: true, meds: ["Levotiroxina"] },
+    "Dislipidemia": { comun: true, meds: ["Atorvastatina", "Rosuvastatina", "Lovastatina"] },
+    "Osteoporosis": { comun: true,
+      meds: ["Alendronato", "Ibandronato", "Ácido zoledrónico", "Denosumab", "Calcio + vitamina D"],
+      preguntas: [{ k: "tiempo", q: "¿Desde hace cuánto recibe el antirresortivo?", op: ["< 4 años", "≥ 4 años", "Ya lo suspendió"] }] },
+    "Cardiopatía": { comun: true,
+      meds: ["ASA", "Clopidogrel", "Warfarina", "Apixabán", "Rivaroxabán", "Atorvastatina"],
+      preguntas: [{ k: "tipo", q: "¿Qué tiene?", op: ["Arritmia", "Infarto previo", "Stent", "Válvula protésica", "Falla cardíaca"], multi: true }] },
+    "Gastritis": { meds: ["Omeprazol", "Esomeprazol"] },
+    "Ansiedad / depresión": { meds: ["Sertralina", "Fluoxetina", "Escitalopram", "Clonazepam", "Amitriptilina"] },
+    "Asma": { meds: ["Salbutamol", "Beclometasona"] },
+    "Artritis reumatoide": { meds: ["Metotrexato", "Prednisolona"] },
+    "Epilepsia": { meds: ["Fenitoína", "Carbamazepina", "Ácido valproico"] },
+    "Enfermedad renal": { meds: [] },
+    "Trastorno de coagulación": { meds: [] },
+    "VIH": { meds: ["Antirretrovirales"] },
+    "Hepatitis": { meds: [] },
+    "Cáncer en tratamiento": { meds: [] }
+  };
+
+  // Lo que cada medicamento implica en periodoncia.
+  const MED_INFO = {
+    "Warfarina": { grupo: "anticoag", nota: "Pedir INR reciente antes de RAR o cirugía." },
+    "Apixabán": { grupo: "anticoag", nota: "Anticoagulante directo: coordinar horario de la dosis." },
+    "Rivaroxabán": { grupo: "anticoag", nota: "Anticoagulante directo: coordinar horario de la dosis." },
+    "Clopidogrel": { grupo: "antiagreg" },
+    "ASA": { grupo: "antiagreg" },
+    "Alendronato": { grupo: "antirresortivo", via: "oral" },
+    "Ibandronato": { grupo: "antirresortivo", via: "oral" },
+    "Risedronato": { grupo: "antirresortivo", via: "oral" },
+    "Ácido zoledrónico": { grupo: "antirresortivo", via: "IV" },
+    "Denosumab": { grupo: "antirresortivo", via: "subcutáneo" },
+    "Amlodipino": { grupo: "agrandamiento" }, "Nifedipino": { grupo: "agrandamiento" },
+    "Ciclosporina": { grupo: "agrandamiento" }, "Fenitoína": { grupo: "agrandamiento" },
+    "Prednisolona": { grupo: "inmuno" }, "Metotrexato": { grupo: "inmuno" },
+    "Sertralina": { grupo: "xerostomia" }, "Fluoxetina": { grupo: "xerostomia" }, "Escitalopram": { grupo: "xerostomia" },
+    "Clonazepam": { grupo: "xerostomia" }, "Amitriptilina": { grupo: "xerostomia" },
+    "Insulina": { grupo: "hipoglucemia" }, "Glibenclamida": { grupo: "hipoglucemia" }
+  };
+  const MEDS_FRECUENTES = ["ASA", "Acetaminofén", "Omeprazol", "Losartán", "Metformina", "Levotiroxina", "Atorvastatina"];
+  const MEDS_TODOS = [...new Set([...Object.values(ENF).flatMap((e) => e.meds), ...Object.keys(MED_INFO), ...MEDS_FRECUENTES,
+    "Ibuprofeno", "Naproxeno", "Loratadina", "Cetirizina", "Anticonceptivos orales", "Tamsulosina", "Pregabalina",
+    "Gabapentina", "Furosemida", "Espironolactona", "Carvedilol", "Propranolol"])].sort();
+
+  const ALERGIAS = [
+    { t: "Penicilina", alt: "Usar clindamicina o azitromicina" },
+    { t: "AINEs", alt: "Analgesia con acetaminofén" },
+    { t: "Anestésicos locales" }, { t: "Látex" }, { t: "Clorhexidina" }, { t: "Sulfas" }
+  ];
+  const PROFILAXIS = ["Válvula cardíaca protésica", "Endocarditis previa", "Cardiopatía congénita", "Prótesis articular < 2 años"];
+
+  const FUMA = ["Cigarrillo", "Cannabis", "Vapeador", "Tabaco / pipa", "Otro"];
+  const CANTIDAD = ["1–5", "6–9", "10–20", "> 20"];
+  const ANIOS = ["< 1 año", "1–5 años", "5–10 años", "> 10 años"];
+  const DEJO = ["< 1 año", "1–5 años", "> 5 años"];
+  const FRECUENCIA = ["Ocasional", "Semanal", "Diario"];
+  const OTROS_HAB = ["Respiración oral", "Onicofagia", "Morder objetos", "Piercing oral", "Estrés"];
+
+  const ODONTO = ["Periodoncia previa", "Exodoncias", "Exodoncias por movilidad", "Restauraciones", "Endodoncia",
+    "Ortodoncia", "Implantes", "Prótesis", "Cirugía oral"];
+  const LIMPIEZA = ["< 6 meses", "6–12 meses", "> 1 año", "Nunca"];
+  const FAMILIARES = ["Periodontitis", "Pérdida dental temprana", "Diabetes", "Hipertensión", "Cardiopatía", "Cáncer"];
+
+  const HBA1C_NO_CONTROLADA = 7.5;
+
+  // ═══ 2. Derivaciones: lo que se deduce de las respuestas ═════════════════
+  function crearEstado() {
+    return {
+      motivos: new Set(), motivoTexto: "", sintomas: new Set(), tiempo: "",
+      alertas: null, alergias: new Set(), embarazo: "", semanas: "", profilaxis: new Set(),
+      enf: null, enfermedades: new Set(), det: {},
+      med: null, meds: new Set(), medDesde: {},
+      tabaco: "", fuma: new Set(), cantidad: "", anios: "", cannabisFrec: "", vapeoFrec: "", dejo: "",
+      alcohol: "", bruxismo: "", bruxTipo: new Set(), placa: "", otrosHab: new Set(),
+      odontologicos: new Set(), limpieza: "", cepillado: "", seda: "", enjuague: "",
+      fam: null, familiares: new Set(),
+      previos: {}, hechos: new Set()
+    };
+  }
+
+  const up = (t) => String(t).toUpperCase();
+  const det = (s, enf) => s.det[enf] || {};
+  // Números a la colombiana: coma decimal y un solo decimal.
+  const fmt = (n) => n.toLocaleString("es-CO", { maximumFractionDigits: 1 });
+  const leerNumero = (t) => (String(t ?? "").trim() ? Number(String(t).replace(",", ".")) : NaN);
+  const hba1c = (s) => leerNumero(det(s, "Diabetes").hba1c);
+
+  function enfermedadActual(s) {
+    const sint = [...s.sintomas];
+    if (!sint.length) return "PACIENTE ACUDE A CITA DE VALORACIÓN POR PERIODONCIA";
+    const txt = sint.length > 1 ? `${sint.slice(0, -1).join(", ")} y ${sint.at(-1)}` : sint[0];
+    return up(`Paciente acude a cita de valoración por periodoncia refiriendo ${txt}${s.tiempo ? ` desde hace ${s.tiempo}` : ""}`);
+  }
+
+  function motivoFinal(s) {
+    if (s.motivoTexto) return `"${s.motivoTexto}" RELATA EL PACIENTE`;
+    return up([...s.motivos].join(", "));
+  }
+
+  // Avisos con su gravedad y, si corresponde, el texto que va a Alertas médicas.
+  function avisos(s) {
+    const out = [];
+    const meds = [...s.meds];
+    const grupo = (g) => meds.filter((m) => MED_INFO[m]?.grupo === g);
+
+    const anticoag = grupo("anticoag");
+    if (anticoag.length) out.push({ tipo: "danger", titulo: `Anticoagulado (${anticoag.join(", ")})`,
+      texto: anticoag.map((m) => MED_INFO[m].nota).join(" "), alerta: `ANTICOAGULADO: ${up(anticoag.join(", "))}` });
+    const antiagreg = grupo("antiagreg");
+    if (antiagreg.length) out.push({ tipo: "warn", titulo: `Antiagregante (${antiagreg.join(", ")})`,
+      texto: "Mayor sangrado en RAR y cirugía; no suspender sin indicación médica.", alerta: `ANTIAGREGADO: ${up(antiagreg.join(", "))}` });
+
+    const anti = grupo("antirresortivo");
+    if (anti.length) {
+      const tiempo = det(s, "Osteoporosis").tiempo;
+      const alto = anti.some((m) => MED_INFO[m].via !== "oral") || tiempo === "≥ 4 años";
+      out.push({ tipo: alto ? "danger" : "warn",
+        titulo: `${alto ? "Riesgo ALTO" : "Riesgo"} de osteonecrosis (${anti.join(", ")})`,
+        texto: alto ? "Vía IV/subcutánea o ≥ 4 años: evitar exodoncias y cirugía ósea; interconsulta."
+          : "Oral < 4 años: riesgo bajo; consentimiento informado antes de cirugía.",
+        alerta: `${alto ? "RIESGO ALTO" : "RIESGO"} DE OSTEONECROSIS: ${up(anti.join(", "))}${tiempo ? ` (${up(tiempo)})` : ""}` });
+    }
+    const agr = grupo("agrandamiento");
+    if (agr.length) out.push({ tipo: "info", titulo: `Agrandamiento gingival posible (${agr.join(", ")})`, texto: "Considerar el medicamento en el diagnóstico." });
+    const inm = grupo("inmuno");
+    if (inm.length) out.push({ tipo: "warn", titulo: `Inmunosupresión (${inm.join(", ")})`, texto: "Peor cicatrización y mayor riesgo de infección.", alerta: "INMUNOSUPRIMIDO" });
+    const xer = grupo("xerostomia");
+    if (xer.length) out.push({ tipo: "info", titulo: `Boca seca posible (${xer.join(", ")})`, texto: "Más placa y caries radicular." });
+    if (grupo("hipoglucemia").length) out.push({ tipo: "warn", titulo: "Riesgo de hipoglucemia", texto: "Citas en la mañana y después de comer.", alerta: "RIESGO DE HIPOGLUCEMIA" });
+
+    if (s.enfermedades.has("Diabetes")) {
+      const h = hba1c(s);
+      if (h >= HBA1C_NO_CONTROLADA) out.push({ tipo: "danger", titulo: `Diabetes no controlada (HbA1c ${fmt(h)} %)`,
+        texto: "Grado C. Interconsulta con medicina interna.", alerta: `DIABETES NO CONTROLADA (HBA1C ${fmt(h)} %)` });
+      else if (h >= 7) out.push({ tipo: "warn", titulo: `HbA1c ${fmt(h)} %`, texto: "≥ 7 %: grado C en la clasificación 2017." });
+    }
+    if (s.enfermedades.has("Hipertensión") && det(s, "Hipertensión").control === "No") {
+      out.push({ tipo: "warn", titulo: "HTA no controlada", texto: "Tomar la presión antes de cada procedimiento.", alerta: "HTA NO CONTROLADA" });
+    }
+    if (s.profilaxis.size || (det(s, "Cardiopatía").tipo || []).includes("Válvula protésica")) {
+      out.push({ tipo: "danger", titulo: "Requiere profilaxis antibiótica", texto: "Antes de sondaje, RAR y cirugía.", alerta: "REQUIERE PROFILAXIS ANTIBIOTICA" });
+    }
+    if (s.embarazo === "Embarazo") {
+      out.push({ tipo: "warn", titulo: `Embarazo${s.semanas ? ` (${s.semanas} semanas)` : ""}`,
+        texto: "Segundo trimestre es el momento más seguro para tratamiento.", alerta: `EMBARAZO${s.semanas ? ` ${s.semanas} SEMANAS` : ""}` });
+    }
+    return out;
+  }
+
+  function gradoTabaco(s) {
+    if (s.tabaco !== "Fuma" || !s.fuma.has("Cigarrillo") || !s.cantidad) return null;
+    return s.cantidad === "1–5" || s.cantidad === "6–9" ? "B (< 10 cigarrillos/día)" : "C (≥ 10 cigarrillos/día)";
+  }
+
+  function asaSugerido(s) {
+    if (!s.enfermedades.size) return { asa: "ASA I", why: "Sin enfermedades sistémicas" };
+    const cardio = det(s, "Cardiopatía").tipo || [];
+    const razones = [];
+    if (hba1c(s) >= HBA1C_NO_CONTROLADA) razones.push("diabetes no controlada");
+    if (det(s, "Hipertensión").control === "No") razones.push("HTA no controlada");
+    if (cardio.some((t) => ["Infarto previo", "Stent", "Falla cardíaca"].includes(t))) razones.push("cardiopatía importante");
+    if (s.enfermedades.has("Enfermedad renal")) razones.push("enfermedad renal");
+    if (razones.length) return { asa: "ASA III", why: razones.join(", ") };
+    return { asa: "ASA II, CONTROLADA POR MEDICAMENTOS", why: "Enfermedad sistémica controlada" };
+  }
+
+  function alertasFinales(s) {
+    const out = [...s.alergias].map((a) => `ALERGIA A ${up(a)}`);
+    avisos(s).forEach((a) => a.alerta && out.push(a.alerta));
+    return [...new Set(out)];
+  }
+
+  function enfermedadesFinales(s) {
+    return [...s.enfermedades].map((e) => {
+      const d = det(s, e);
+      if (e === "Diabetes") {
+        const h = hba1c(s);
+        return up(`Diabetes${d.tipo ? ` mellitus ${d.tipo.toLowerCase()}` : ""}${h ? ` (HbA1c ${fmt(h)} %)` : ""}`);
+      }
+      if (e === "Hipertensión") {
+        return d.control === "Sí" ? "HIPERTENSION ARTERIAL CONTROLADA" : d.control === "No" ? "HIPERTENSION ARTERIAL NO CONTROLADA" : "HIPERTENSION ARTERIAL";
+      }
+      if (e === "Cardiopatía" && d.tipo?.length) return up(`Cardiopatía (${d.tipo.join(", ")})`);
+      return up(e);
+    });
+  }
+
+  function habitosFinales(s) {
+    const out = [];
+    if (s.tabaco === "Fuma") {
+      s.fuma.forEach((f) => {
+        if (f === "Cigarrillo") out.push(up(`Fuma cigarrillo${s.cantidad ? ` ${s.cantidad} al día` : ""}${s.anios ? ` hace ${s.anios}` : ""}`));
+        else if (f === "Cannabis") out.push(up(`Consume cannabis${s.cannabisFrec ? ` ${s.cannabisFrec.toLowerCase()}` : ""}`));
+        else if (f === "Vapeador") out.push(up(`Usa vapeador${s.vapeoFrec ? ` ${s.vapeoFrec.toLowerCase()}` : ""}`));
+        else out.push(up(f));
+      });
+    }
+    if (s.tabaco === "Exfumador") out.push(up(`Exfumador${s.dejo ? `, dejó hace ${s.dejo}` : ""}`));
+    if (s.alcohol && s.alcohol !== "No") out.push(up(`Alcohol ${s.alcohol.toLowerCase()}`));
+    if (s.bruxismo === "Sí") {
+      out.push(up(`Bruxismo${s.bruxTipo.size ? ` ${[...s.bruxTipo].join(" y ").toLowerCase()}` : ""}${s.placa === "Sí" ? ", usa placa" : s.placa === "No" ? ", sin placa" : ""}`));
+    }
+    s.otrosHab.forEach((h) => out.push(up(h)));
+    return out;
+  }
+
+  function higiene(s) {
+    const partes = [];
+    if (s.cepillado) partes.push(`CEPILLADO ${s.cepillado} VECES AL DIA`);
+    if (s.seda) partes.push(s.seda === "Sí" ? "USA SEDA DENTAL" : "NO USA SEDA DENTAL");
+    if (s.enjuague) partes.push(s.enjuague === "Sí" ? "USA ENJUAGUE" : "NO USA ENJUAGUE");
+    if (s.limpieza) partes.push(`ULTIMA PROFILAXIS: ${up(s.limpieza)}`);
+    return partes.join(", ");
+  }
+
   // ─── Utilidades ─────────────────────────────────────────────────────────
   const STYLE_ID = "dlk-anam-style";
   const TOOLBAR_ATTR = "data-dlk-anam-toolbar";
@@ -522,7 +761,11 @@
   }, 800);
 
   if (globalThis.__DLK_ANAM_TEST__) {
-    globalThis.__dlkAnamTest = { addToSection, applyAutoDefaults, getSections, missingSections, norm, present, sinAntecedentes };
+    globalThis.__dlkAnamTest = {
+      addToSection, applyAutoDefaults, getSections, missingSections, norm, present, sinAntecedentes,
+      crearEstado, fmt, leerNumero, enfermedadActual, motivoFinal, avisos, gradoTabaco, asaSugerido,
+      alertasFinales, enfermedadesFinales, habitosFinales, higiene
+    };
   }
 
   schedule();
