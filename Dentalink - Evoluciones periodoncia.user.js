@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.3.0
+// @version      3.3.1
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -1171,7 +1171,9 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   function buildAlargamientoText(values) {
     const duration = Number(values.duracion) || 60;
     const range = currentTimeRange(duration);
-    return `DIAGNÓSTICO: Hiperplasia gingival
+    const diagnostico = normalizePlanText(values.diagnostico) || "Invasión del espacio biológico";
+    const carpules = normalizePlanText(values.carpules) || "2";
+    return `DIAGNÓSTICO: ${diagnostico}
 PROCEDIMIENTO: Alargamiento de Corona Clínica.
 DIENTE: ${values.diente}
 RESTAURACIÓN: ${values.restauracion}
@@ -1187,7 +1189,7 @@ Consentimiento: El paciente firma y acepta el consentimiento informado, comprend
 Asepsia: Asepsia oral y perioral con Gluconato de Clorhexidina y colocación de campo estéril.
 
 ANESTESIA
-Farmaco: ${CONFIG.anestesia.farmaco} (2 carpules).
+Farmaco: ${CONFIG.anestesia.farmaco} (${carpules} carpules en total).
 Técnica: ${values.tecnica}
 
 FASE QUIRURGICA (INCISION Y ABORDAJE)
@@ -1196,7 +1198,7 @@ Incisión: Se realiza incisión intrasurcular festoneada en diente ${values.dien
 Colgajo: Elevación de colgajo mucoperiostio de espesor total por vestibular y lingual mediante periostótomo, exponiendo la cresta ósea alveolar.
 
 OSTECTOMIA Y OSTEOPLASTIA
-Remodelado óseo: Se realiza osteotomía (remoción de hueso de soporte) para establecer una distancia mínima de 3 mm entre el margen de la futura restauración y la cresta ósea (espacio biológico).
+Remodelado óseo: Se realiza ostectomía (remoción de hueso de soporte) para establecer una distancia mínima de 3 mm entre el margen de la futura restauración y la cresta ósea (espacio biológico).
 
 Osteoplastia: Remodelado de la arquitectura ósea para devolver una anatomía funcional y armoniosa.
 
@@ -1655,6 +1657,8 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     openFormPrompt("Alargamiento", [
       { name: "diente", label: "Diente(s)", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
       { name: "restauracion", label: "Restauración", value: "" },
+      { name: "diagnostico", label: "Diagnóstico", value: "Invasión del espacio biológico" },
+      { name: "carpules", label: "Carpules en total", value: "2" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
       { name: "duracion", label: "Duración de la cita (minutos)", value: "60" }
     ], (values) => insertTreatmentText(
