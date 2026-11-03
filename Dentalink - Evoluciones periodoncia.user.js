@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Evoluciones periodoncia
 // @namespace    https://odontofamily.local/dentalink-evoluciones-periodoncia
-// @version      3.3.1
+// @version      3.4.0
 // @description  Agrega botones de textos rápidos para evoluciones de periodoncia en Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -1070,21 +1070,53 @@ ${lines.join("\n")}`;
   // TEXTOS DE EVOLUCIÓN
   // ═══════════════════════════════════════════════════════════════════════
 
+  const ALARGAMIENTO_DIAGNOSTICOS = {
+    caries: {
+      label: "Restaurador · caries subgingival (K02.1)",
+      diagnostico: "K02.1 - Caries de la dentina. Invasión del espacio biológico (tejidos supracrestales adheridos)",
+      hallazgos: (diente, restauracion) => `Paciente requiere restauración tipo ${restauracion} en diente ${diente}. Se evidencia lesión cariosa con margen subgingival que compromete el espacio biológico.`
+    },
+    fractura: {
+      label: "Restaurador · fractura subgingival (S02.5)",
+      diagnostico: "S02.5 - Fractura de los dientes. Invasión del espacio biológico (tejidos supracrestales adheridos)",
+      hallazgos: (diente, restauracion) => `Paciente requiere restauración tipo ${restauracion} en diente ${diente}. Se evidencia línea de fractura con margen subgingival que compromete el espacio biológico.`
+    },
+    hiperplasia: {
+      label: "Estético · agrandamiento gingival (K06.1)",
+      diagnostico: "K06.1 - Hiperplasia gingival",
+      hallazgos: (diente) => `Se evidencia agrandamiento gingival con corona clínica corta en diente ${diente}, con exposición gingival excesiva que compromete la estética y/o el control de placa.`
+    }
+  };
+
+  function anesthesiaBlock(values, techniqueSuffix = "") {
+    const carpules = normalizePlanText(values.carpules) || "1";
+    return `ANESTESIA
+Farmaco: ${CONFIG.anestesia.farmaco} (${carpules} carpules en total).
+Técnica: ${values.tecnica}${techniqueSuffix}. Aspiración negativa previa a la infiltración.`;
+  }
+
+  function complicationsLine(values) {
+    const text = normalizePlanText(values.complicaciones) || "Ninguna";
+    return `Complicaciones intraoperatorias: ${text.replace(/\.?$/, ".")}`;
+  }
+
   function buildAlisadoCerradoText(values) {
     const duration = Number(values.duracion) || 45;
     const range = currentTimeRange(duration);
     const anestesia = values.usarAnestesia === "sin"
       ? "ANESTESIA\nProcedimiento realizado sin anestesia local."
-      : `ANESTESIA
-Farmaco: ${CONFIG.anestesia.farmaco} (${values.carpules} carpules en total).
-Técnica: ${values.tecnica}`;
+      : anesthesiaBlock(values);
+    const extension = values.extension === "localizada" ? "localizada" : "generalizada";
+    const clorhexidina = values.clorhexidina === "si"
+      ? "\nUso de enjuague bucal con clorhexidina al 0.12% cada 12 horas por 7 días."
+      : "";
     return `DIAGNÓSTICO: ${CONFIG.diagnostico}
 PROCEDIMIENTO: Raspado y Alisado Radicular (RAR) Campo Cerrado
 Dientes: ${values.dientes}
 HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
 
 VALORACION Y PREPARACION
-Hallazgos clínicos: Se observa presencia de cálculos supra y subgingivales, inflamación gingival generalizada y sangrado al sondaje.
+Hallazgos clínicos: Se observa presencia de cálculos supra y subgingivales, inflamación gingival ${extension} y sangrado al sondaje.
 Asepsia: Enjuague previo con clorhexidina al 0.12% para disminuir la carga bacteriana salival.
 
 ${anestesia}
@@ -1097,20 +1129,21 @@ Exploración: Se utiliza sonda periodontal para localización táctil de cálcul
 
 Instrumentación: Uso de curetas Gracey específicas para cada zona. Se inserta la hoja de forma suave y paralela al eje dental hasta sobrepasar el cálculo (posición apical).
 
-Acción: Con un punto de apoyo firme, se realizan movimientos de tracción controlada para eliminar el cálculo y alisar la superficie radicular, dejando una superficie biocompatible y libre de endotoxinas.
+Acción: Con un punto de apoyo firme, se realizan movimientos de tracción controlada para eliminar el cálculo y alisar la superficie radicular, dejando una superficie radicular lisa y sin cálculo detectable a la exploración.
 
 FINALIZACION Y PROFILAXIS
 Se realiza profilaxis dental con copa de caucho/cepillo y pasta profilactica para eliminar placa blanda residual y pulir superficies coronales.
 
 Se verifica la ausencia de depósitos remanentes mediante exploración táctil.
 
+${complicationsLine(values)}
+
 INDICACIONES Y EGRESO
 Egreso: Paciente finaliza el procedimiento en buenas condiciones generales, consciente, orientado y con hemostasia controlada.
 
 Recomendaciones:
 Instrucción en técnica de cepillado y uso de seda dental.
-Posible sensibilidad dental transitoria al frío/calor (se recomienda crema desensibilizante si es necesario).
-Uso de enjuague bucal con clorhexidina si se indicó.
+Posible sensibilidad dental transitoria al frío/calor (se recomienda crema desensibilizante si es necesario).${clorhexidina}
 
 ${CONFIG.notaControles}
 
@@ -1126,13 +1159,13 @@ Dientes: ${values.dientes}
 HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
 
 VALORACION Y PREPARACION
-Hallazgos clínicos: Se observa inflamación persistente, cálculos subgingivales profundos de difícil acceso y bolsas periodontales de difícil acceso.
+Hallazgos clínicos: Se observa inflamación persistente, con cálculos subgingivales profundos y bolsas periodontales de difícil acceso.
+
+Consentimiento: El paciente firma y acepta el consentimiento informado, comprendiendo los riesgos de dolor e inflamación postoperatoria, sangrado, recesión gingival, sensibilidad dental y posible necesidad de tratamientos adicionales.
 
 Asepsia: Enjuague previo con Gluconato de Clorhexidina al 0.12% y asepsia perioral.
 
-ANESTESIA
-Farmaco: ${CONFIG.anestesia.farmaco} (${values.carpules} carpules en total).
-Técnica: ${values.tecnica} para permitir una instrumentación profunda y cómoda para el paciente.
+${anesthesiaBlock(values, " para permitir una instrumentación profunda y cómoda para el paciente")}
 
 FASE QUIRURGICA Y ACCESO (ALISADO ABIERTO)
 Incisión y Colgajo: Se realiza incisión intrasurcular y se eleva colgajo de espesor total (mucoperiostio) utilizando mango de bisturí con hoja #15 y periostótomo, con el fin de obtener visibilidad directa de la superficie radicular y defectos óseos.
@@ -1153,8 +1186,13 @@ Sutura: Reposición del colgajo y cierre con ${CONFIG.sutura}.
 
 Profilaxis: Se complementa con limpieza de las superficies coronales para disminuir la carga bacteriana supragingival.
 
+${complicationsLine(values)}
+
 INDICACIONES Y EGRESO
 Egreso: Paciente finaliza el procedimiento consciente, orientado, con hemostasia controlada y tolera el tratamiento satisfactoriamente.
+
+Farmacología:
+${CONFIG.farmacologia.naproxeno}
 
 Plan de Seguimiento: Se advierte al paciente sobre la importancia del mantenimiento periodontal estricto en 3 meses para confirmar el pronóstico de las piezas tratadas.
 
@@ -1171,16 +1209,15 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   function buildAlargamientoText(values) {
     const duration = Number(values.duracion) || 60;
     const range = currentTimeRange(duration);
-    const diagnostico = normalizePlanText(values.diagnostico) || "Invasión del espacio biológico";
-    const carpules = normalizePlanText(values.carpules) || "2";
-    return `DIAGNÓSTICO: ${diagnostico}
+    const dx = ALARGAMIENTO_DIAGNOSTICOS[values.diagnostico] || ALARGAMIENTO_DIAGNOSTICOS.caries;
+    return `DIAGNÓSTICO: ${dx.diagnostico}
 PROCEDIMIENTO: Alargamiento de Corona Clínica.
 DIENTE: ${values.diente}
 RESTAURACIÓN: ${values.restauracion}
 HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
 
 VALORACION Y PREPARACION
-Hallazgos clínicos: Paciente requiere restauración tipo ${values.restauracion} en diente ${values.diente}. Se evidencia margen de la lesión/preparación subgingival que compromete el espacio biológico.
+Hallazgos clínicos: ${dx.hallazgos(values.diente, values.restauracion)}
 
 Sondaje preoperatorio: Se realiza sondaje transgingival bajo anestesia para localizar la cresta alveolar y determinar la magnitud de la ostectomía necesaria.
 
@@ -1188,9 +1225,7 @@ Consentimiento: El paciente firma y acepta el consentimiento informado, comprend
 
 Asepsia: Asepsia oral y perioral con Gluconato de Clorhexidina y colocación de campo estéril.
 
-ANESTESIA
-Farmaco: ${CONFIG.anestesia.farmaco} (${carpules} carpules en total).
-Técnica: ${values.tecnica}
+${anesthesiaBlock(values)}
 
 FASE QUIRURGICA (INCISION Y ABORDAJE)
 Incisión: Se realiza incisión intrasurcular festoneada en diente ${values.diente}, incluyendo incisión crestal según la planificación estética.
@@ -1208,8 +1243,13 @@ SUTURA Y POSICIONAMIENTO
 Técnica: Reposicionamiento del colgajo de manera apical a la unión amelocementaria para ganar altura de corona clínica.
 Material: Sutura con ${CONFIG.sutura}
 
+${complicationsLine(values)}
+
 PLAN DE MANEJO Y RECOMENDACIONES
 Egreso: Paciente estable, con hemostasia controlada.
+
+Farmacología:
+${CONFIG.farmacologia.naproxeno}
 
 Recomendaciones: Reposo moderado (48h), dieta fría/blanda, no escupir, no fumar (15 días), higiene delicada en la zona sin cepillado traumático de la sutura. Cita para retiro de sutura en 8 días.
 
@@ -1278,13 +1318,14 @@ Cita 20 min`;
   function buildDetartrajeText(values) {
     const duration = Number(values.duracion) || 30;
     const range = currentTimeRange(duration);
+    const extension = values.extension === "localizada" ? "localizada" : "generalizada";
     return `DIAGNÓSTICO: ${CONFIG.diagnostico}
 PROCEDIMIENTO: Detartraje supragingival y subgingival.
 Dientes: ${values.dientes}
 HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
 
 VALORACION Y PREPARACION
-Hallazgos clínicos: Se observa presencia de cálculos supra y subgingivales, inflamación gingival generalizada y sangrado al sondaje.
+Hallazgos clínicos: Se observa presencia de cálculos supra y subgingivales, inflamación gingival ${extension} y sangrado al sondaje.
 Asepsia: Enjuague previo con clorhexidina al 0.12% para disminuir la carga bacteriana salival.
 
 FASE DE DESBRIDAMIENTO (ULTRASONIDO)
@@ -1296,6 +1337,8 @@ Se realiza instrumentación cuidadosa para eliminar cálculo dental y placa bact
 Se complementa con profilaxis dental con copa de caucho/cepillo y pasta profilactica para eliminar placa blanda residual y pulir superficies coronales.
 
 Se verifica la ausencia de depósitos remanentes mediante exploración táctil.
+
+${complicationsLine(values)}
 
 INDICACIONES Y EGRESO
 Egreso: Paciente finaliza el procedimiento en buenas condiciones generales, consciente, orientado y con hemostasia controlada.
@@ -1313,6 +1356,7 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   function buildAjusteOclusalText(values) {
     const range = currentTimeRange(20);
     return `DIAGNÓSTICO: ${CONFIG.diagnostico}
+DIAGNÓSTICO RELACIONADO: Trauma oclusal secundario.
 PROCEDIMIENTO: Ajuste oclusal selectivo.
 Dientes: ${values.dientes}
 HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
@@ -1329,6 +1373,8 @@ Verificación: Se comprueba repetidamente con papel articular hasta obtener cont
 
 Pulido: Se realiza pulido de las superficies ajustadas para eliminar irregularidades residuales.
 
+${complicationsLine(values)}
+
 INDICACIONES Y EGRESO
 Egreso: Paciente finaliza el procedimiento en buenas condiciones generales, con oclusión equilibrada y sin molestias.
 
@@ -1342,6 +1388,13 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
   function buildDrenajeText(values) {
     const range = currentTimeRange(30);
+    const anestesia = values.usarAnestesia === "sin"
+      ? "ANESTESIA\nProcedimiento realizado sin anestesia local."
+      : anesthesiaBlock(values);
+    const sistemico = values.sistemico === "si"
+      ? "Evaluación sistémica: Se evidencia compromiso sistémico (fiebre, malestar general y/o adenopatías regionales), por lo que se indica manejo antibiótico sistémico."
+      : "Evaluación sistémica: Paciente afebril, sin adenopatías regionales ni compromiso sistémico; no se indica antibiótico sistémico.";
+    const antibiotico = values.sistemico === "si" ? "\nSe formula antibiótico sistémico según receta." : "";
     return `DIAGNÓSTICO: ${CONFIG.diagnostico}
 PROCEDIMIENTO: Drenaje periodontal.
 Dientes: ${values.dientes}
@@ -1349,6 +1402,9 @@ HORA INICIO: ${range.start} | HORA FINAL: ${range.end}
 
 VALORACION Y PREPARACION
 Hallazgos clínicos: Se evidencia presencia de exudado purulento/supuración activa en los tejidos periodontales, con inflamación aguda y dolor localizado, consistente con absceso periodontal.
+${sistemico}
+
+${anestesia}
 
 PROCEDIMIENTO
 Drenaje: Se procede a drenar el absceso periodontal mediante acceso por el surco gingival, permitiendo la salida del contenido purulento y reducción de la presión tisular.
@@ -1357,8 +1413,13 @@ Desbridamiento: Se realiza curetaje subgingival e irrigación profusa con clorhe
 
 Irrigación: Lavado abundante de la zona con solución salina para garantizar la eliminación completa del material purulento.
 
+${complicationsLine(values)}
+
 INDICACIONES Y EGRESO
-Egreso: Paciente finaliza el procedimiento con disminución del dolor, control de la infección aguda y hemostasia controlada.
+Egreso: Paciente finaliza el procedimiento con disminución del dolor y de la sintomatología aguda, y hemostasia controlada.
+
+Farmacología:
+${CONFIG.farmacologia.naproxeno}${antibiotico}
 
 Recomendaciones:
 Enjuague con clorhexidina al 0.12% cada 12 horas por 7 días.
@@ -1371,8 +1432,11 @@ ATENDIDO POR: ${CONFIG.doctor}`;
 
 
 
-  function buildControlText() {
+  function buildControlText(values = {}) {
     const periodontalSummary = getSavedPeriodontalSummary();
+    const detartraje = values.detartraje === "si"
+      ? "\n\nSe realiza detartraje ultrasónico de las zonas con depósitos calcificados identificados."
+      : "";
     const range = currentTimeRange(20);
     const base = `DIAGNÓSTICO: ${CONFIG.diagnostico}
 PROCEDIMIENTO: Control periodontal de mantenimiento.
@@ -1388,9 +1452,7 @@ Sangrado al sondaje: Se registran los sitios con sangrado al sondaje como indica
 Evaluación de tejidos blandos: Se valora color, textura, contorno y consistencia de la encía, verificando la resolución de la inflamación.
 
 PROCEDIMIENTO
-Se realiza profilaxis de mantenimiento con copa de caucho y pasta profiláctica para remoción de placa blanda residual.
-
-Se realiza detartraje ultrasónico de las zonas con depósitos calcificados identificados.
+Se realiza profilaxis de mantenimiento con copa de caucho y pasta profiláctica para remoción de placa blanda residual.${detartraje}
 
 Se refuerzan instrucciones de higiene oral: técnica de cepillado de Bass modificada, uso de seda dental y enjuague bucal según indicación.
 
@@ -1431,9 +1493,7 @@ Consentimiento: El paciente firma y acepta el consentimiento informado, comprend
 
 Asepsia: Asepsia oral y perioral con Gluconato de Clorhexidina al 0.12%.
 
-ANESTESIA
-Farmaco: ${CONFIG.anestesia.farmaco} (${values.carpules} carpules en total).
-Técnica: ${values.tecnica}
+${anesthesiaBlock(values)}
 
 FASE QUIRURGICA
 Técnica: Se realiza frenillectomía mediante incisión en forma romboidal del frenillo ${values.frenillo}, abarcando desde la inserción mucosa hasta la inserción gingival.
@@ -1445,6 +1505,8 @@ Hemostasia: Control de hemostasia mediante compresión directa.
 SUTURA Y CIERRE
 Técnica: Cierre primario con ${CONFIG.sutura}.
 Se verifica la correcta movilidad de los tejidos post-sutura sin tensión residual.
+
+${complicationsLine(values)}
 
 INDICACIONES Y EGRESO
 Egreso: Paciente finaliza el procedimiento en buenas condiciones generales, con hemostasia controlada.
@@ -1630,8 +1692,13 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
       { name: "carpules", label: "Carpules en total", value: String(defaultCarpules), dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
       { name: "tecnica", label: "Técnica anestésica", value: defaultTecnica, autoAnesthesiaFrom: "dientes", dependsOn: allowNoAnesthesia ? { name: "usarAnestesia", value: "con" } : null },
-      { name: "duracion", label: "Duración de la cita (minutos)", value: String(defaultDuration) }
+      { name: "duracion", label: "Duración de la cita (minutos)", value: String(defaultDuration) },
+      { name: "complicaciones", label: "Complicaciones intraoperatorias", value: "Ninguna" }
     ];
+    if (category === "closed") {
+      fields.splice(1, 0, { name: "extension", label: "Inflamación gingival", type: "select", value: "generalizada", options: [{ value: "generalizada", label: "Generalizada" }, { value: "localizada", label: "Localizada" }] });
+      fields.push({ name: "clorhexidina", label: "Enjuague con clorhexidina en casa", type: "select", value: "no", options: [{ value: "no", label: "No indicado" }, { value: "si", label: "Sí, cada 12 h por 7 días" }] });
+    }
     if (allowNoAnesthesia) {
       fields.splice(1, 0, {
         name: "usarAnestesia",
@@ -1657,10 +1724,17 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     openFormPrompt("Alargamiento", [
       { name: "diente", label: "Diente(s)", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
       { name: "restauracion", label: "Restauración", value: "" },
-      { name: "diagnostico", label: "Diagnóstico", value: "Invasión del espacio biológico" },
+      {
+        name: "diagnostico",
+        label: "Diagnóstico",
+        type: "select",
+        value: "caries",
+        options: Object.entries(ALARGAMIENTO_DIAGNOSTICOS).map(([value, dx]) => ({ value, label: dx.label }))
+      },
       { name: "carpules", label: "Carpules en total", value: "2" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
-      { name: "duracion", label: "Duración de la cita (minutos)", value: "60" }
+      { name: "duracion", label: "Duración de la cita (minutos)", value: "60" },
+      { name: "complicaciones", label: "Complicaciones intraoperatorias", value: "Ninguna" }
     ], (values) => insertTreatmentText(
       buildAlargamientoText(values),
       "crown_lengthening",
@@ -1673,7 +1747,9 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     const treatmentContext = contextOverride || getOpenTreatmentContext("scaling");
     openFormPrompt("Detartraje", [
       { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
-      { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
+      { name: "extension", label: "Inflamación gingival", type: "select", value: "generalizada", options: [{ value: "generalizada", label: "Generalizada" }, { value: "localizada", label: "Localizada" }] },
+      { name: "duracion", label: "Duración de la cita (minutos)", value: "30" },
+      { name: "complicaciones", label: "Complicaciones intraoperatorias", value: "Ninguna" }
     ], (values) => insertTreatmentText(
       buildDetartrajeText(values),
       "scaling",
@@ -1685,7 +1761,8 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   function openAjusteOclusalPrompt(contextOverride = null, groupedContext = null) {
     const treatmentContext = contextOverride || getOpenTreatmentContext("occlusal_adjustment");
     openFormPrompt("Ajuste oclusal", [
-      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) }
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
+      { name: "complicaciones", label: "Complicaciones intraoperatorias", value: "Ninguna" }
     ], (values) => insertTreatmentText(
       buildAjusteOclusalText(values),
       "occlusal_adjustment",
@@ -1697,7 +1774,12 @@ ATENDIDO POR: ${CONFIG.doctor}`;
   function openDrenajePrompt(contextOverride = null, groupedContext = null) {
     const treatmentContext = contextOverride || getOpenTreatmentContext("drainage");
     openFormPrompt("Drenaje periodontal", [
-      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) }
+      { name: "dientes", label: "Dientes", value: treatmentContext?.teeth.join(", ") || "", readOnly: Boolean(groupedContext) },
+      { name: "usarAnestesia", label: "Anestesia", type: "select", value: "con", options: [{ value: "con", label: "Con anestesia" }, { value: "sin", label: "Sin anestesia" }] },
+      { name: "carpules", label: "Carpules en total", value: "1", dependsOn: { name: "usarAnestesia", value: "con" } },
+      { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa", autoAnesthesiaFrom: "dientes", dependsOn: { name: "usarAnestesia", value: "con" } },
+      { name: "sistemico", label: "Compromiso sistémico (fiebre, adenopatías)", type: "select", value: "no", options: [{ value: "no", label: "No · sin antibiótico" }, { value: "si", label: "Sí · se formula antibiótico" }] },
+      { name: "complicaciones", label: "Complicaciones intraoperatorias", value: "Ninguna" }
     ], (values) => insertTreatmentText(
       buildDrenajeText(values),
       "drainage",
@@ -1712,7 +1794,8 @@ ATENDIDO POR: ${CONFIG.doctor}`;
       { name: "frenillo", label: "Tipo de frenillo (labial superior, labial inferior, lingual)", value: "labial superior" },
       { name: "carpules", label: "Carpules en total", value: "1" },
       { name: "tecnica", label: "Técnica anestésica", value: "Infiltrativa" },
-      { name: "duracion", label: "Duración de la cita (minutos)", value: "30" }
+      { name: "duracion", label: "Duración de la cita (minutos)", value: "30" },
+      { name: "complicaciones", label: "Complicaciones intraoperatorias", value: "Ninguna" }
     ], (values) => insertTreatmentText(
       buildFrenillectomiaText(values),
       "frenectomy",
@@ -1758,7 +1841,12 @@ ATENDIDO POR: ${CONFIG.doctor}`;
     if (label === "Detartraje") { openDetartrajePrompt(); return; }
     if (label === "Ajuste oclusal") { openAjusteOclusalPrompt(); return; }
     if (label === "Drenaje") { openDrenajePrompt(); return; }
-    if (label === "Control") { insertTreatmentText(buildControlText()); return; }
+    if (label === "Control") {
+      openFormPrompt("Control periodontal", [
+        { name: "detartraje", label: "Detartraje ultrasónico", type: "select", value: "no", options: [{ value: "no", label: "No realizado" }, { value: "si", label: "Sí, en zonas con cálculo" }] }
+      ], (values) => insertTreatmentText(buildControlText(values)));
+      return;
+    }
     if (label === "Frenillectomía") { openFrenillectomiaPrompt(); return; }
     alert(`Boton "${label}" creado. Falta definir su texto.`);
   }
