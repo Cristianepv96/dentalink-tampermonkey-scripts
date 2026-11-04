@@ -22,6 +22,8 @@ test("HbA1c 7,4 solo avisa grado C, sin alerta", () => {
   const aviso = api.avisos(s).find((x) => /HbA1c/.test(x.titulo));
   assert.equal(aviso.tipo, "warn");
   assert.equal(aviso.alerta, undefined);
+  assert.equal(api.asaSugerido(s).asa, "ASA II");
+  s.meds.add("Metformina");
   assert.equal(api.asaSugerido(s).asa, "ASA II, CONTROLADA POR MEDICAMENTOS");
 });
 

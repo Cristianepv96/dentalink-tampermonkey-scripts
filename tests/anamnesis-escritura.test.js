@@ -52,11 +52,11 @@ test("Alertas lleva el ASA y las alertas derivadas", () => {
   assert.equal(texto, "ASA III, DIABETES NO CONTROLADA (HBA1C 8 %)");
 });
 
-test("no pisa un motivo ya escrito", () => {
+test("no pisa un motivo ya escrito; solo le pone comillas", () => {
   const ficha = { "Motivo de consulta": { lista: [], texto: "DOLOR" } };
   const s = api.estadoDesdeFicha(ficha);
   s.motivos.add("Dientes flojos");
-  assert.equal(api.planEscritura(s, ficha)["Motivo de consulta"].texto, "DOLOR");
+  assert.equal(api.planEscritura(s, ficha)["Motivo de consulta"].texto, "\"DOLOR\"");
 });
 
 test("no escribe enfermedad actual ni motivo si ya los tiene como etiqueta", () => {
@@ -78,5 +78,5 @@ test("el ASA no hace quitar la etiqueta NO ALERGIA", () => {
   const s = api.estadoDesdeFicha(ficha);
   const plan = api.planEscritura(s, ficha);
   assert.deepEqual([...plan["Alertas médicas"].quitar], []);
-  assert.equal(plan["Alertas médicas"].texto, "ASA II, CONTROLADA POR MEDICAMENTOS");
+  assert.equal(plan["Alertas médicas"].texto, "ASA II");
 });

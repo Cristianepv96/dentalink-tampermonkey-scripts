@@ -56,7 +56,7 @@ test("ida y vuelta: cardiopatía con stent y válvula conserva ASA III y profila
 });
 
 test("ida y vuelta: ASA II no se duplica", () => {
-  const { escrita } = idaYVuelta((s) => { s.enf = true; s.enfermedades.add("Hipotiroidismo"); });
+  const { escrita } = idaYVuelta((s) => { s.enf = true; s.enfermedades.add("Hipotiroidismo"); s.med = true; s.meds.add("Levotiroxina"); });
   assert.equal(escrita["Alertas médicas"].texto, "ASA II, CONTROLADA POR MEDICAMENTOS");
 });
 

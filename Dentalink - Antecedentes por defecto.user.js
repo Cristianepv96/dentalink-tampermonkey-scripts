@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Antecedentes por defecto
 // @namespace    https://odontofamily.local/dentalink-antecedentes
-// @version      3.0.1
+// @version      3.1.0
 // @description  Anamnesis paso a paso: panel lateral que guía la entrevista, avisa riesgos periodontales y escribe la Ficha Anamnesis en las listas de Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
@@ -100,6 +100,7 @@
     "Ortodoncia", "Implantes", "Prótesis", "Cirugía oral"];
   const LIMPIEZA = ["< 6 meses", "6–12 meses", "> 1 año", "Nunca"];
   const FAMILIARES = ["Periodontitis", "Pérdida dental temprana", "Diabetes", "Hipertensión", "Cardiopatía", "Cáncer"];
+  const PARIENTES = ["Madre", "Padre", "Hermanos", "Abuelos", "Tíos", "Hijos"];
 
   const HBA1C_NO_CONTROLADA = 7.5;
 
@@ -113,7 +114,7 @@
       tabaco: "", fuma: new Set(), cantidad: "", anios: "", cannabisFrec: "", vapeoFrec: "", dejo: "",
       alcohol: "", bruxismo: "", bruxTipo: new Set(), placa: "", otrosHab: new Set(),
       odontologicos: new Set(), limpieza: "", cepillado: "", seda: "", enjuague: "",
-      fam: null, familiares: new Set(),
+      fam: null, familiares: new Set(), famQuien: {},
       // previos: lo de la ficha que el panel no entiende (solo se muestra);
       // base: lo que el panel leyó y entiende, y por tanto puede reescribir.
       previos: {}, hechos: new Set(), base: {}, tocado: false
@@ -134,9 +135,13 @@
     return up(`Paciente acude a cita de valoración por periodoncia refiriendo ${txt}${s.tiempo ? ` desde hace ${s.tiempo}` : ""}`);
   }
 
+  // El motivo de consulta siempre va entre comillas.
+  const sinComillas = (t) => spaces(t).replace(/^["“”]+|["“”]+$/g, "").trim();
+  const entreComillas = (t) => (/["“”]/.test(t) ? t : `"${spaces(t)}"`);
   function motivoFinal(s) {
-    if (s.motivoTexto) return `"${s.motivoTexto}" RELATA EL PACIENTE`;
-    return up([...s.motivos].join(", "));
+    const propio = sinComillas(s.motivoTexto);
+    if (propio) return `"${propio}" RELATA EL PACIENTE`;
+    return s.motivos.size ? `"${up([...s.motivos].join(", "))}"` : "";
   }
 
   // Avisos con su gravedad y, si corresponde, el texto que va a Alertas médicas.
@@ -205,7 +210,9 @@
     if (cardio.some((t) => ["Infarto previo", "Stent", "Falla cardíaca"].includes(t))) razones.push("cardiopatía importante");
     if (s.enfermedades.has("Enfermedad renal")) razones.push("enfermedad renal");
     if (razones.length) return { asa: "ASA III", why: razones.join(", ") };
-    return { asa: "ASA II, CONTROLADA POR MEDICAMENTOS", why: "Enfermedad sistémica controlada" };
+    const tomaMedicamentos = s.meds.size > 0 || (s.med !== false && (s.previos["Medicamentos"] || []).length > 0);
+    return tomaMedicamentos ? { asa: "ASA II, CONTROLADA POR MEDICAMENTOS", why: "Enfermedad sistémica controlada con medicamentos" }
+      : { asa: "ASA II", why: "Enfermedad sistémica leve, sin medicamentos" };
   }
 
   function alertasFinales(s) {
@@ -245,16 +252,26 @@
       out.push(up(`Bruxismo${s.bruxTipo.size ? ` ${[...s.bruxTipo].join(" y ").toLowerCase()}` : ""}${s.placa === "Sí" ? " (usa placa)" : s.placa === "No" ? " (sin placa)" : ""}`));
     }
     s.otrosHab.forEach((h) => out.push(up(h)));
-    return out;
+    return [...out, ...higiene(s)];
   }
 
+  // Higiene oral: va en Hábitos.
   function higiene(s) {
     const partes = [];
     if (s.cepillado) partes.push(`CEPILLADO ${s.cepillado} VECES AL DIA`);
     if (s.seda) partes.push(s.seda === "Sí" ? "USA SEDA DENTAL" : "NO USA SEDA DENTAL");
     if (s.enjuague) partes.push(s.enjuague === "Sí" ? "USA ENJUAGUE" : "NO USA ENJUAGUE");
-    if (s.limpieza) partes.push(`ULTIMA PROFILAXIS: ${up(s.limpieza)}`);
-    return partes.join(", ");
+    return partes;
+  }
+  // Lo de Antecedentes odontológicos que no es una etiqueta de su lista.
+  const odontoTexto = (s) => (s.limpieza ? [`ULTIMA PROFILAXIS: ${up(s.limpieza)}`] : []);
+
+  // Antecedente familiar con quién lo tiene: «PERIODONTITIS (MADRE, TÍOS)».
+  function familiaresFinales(s) {
+    return [...s.familiares].map((f) => {
+      const quien = PARIENTES.filter((p) => (s.famQuien[f] || []).includes(p));
+      return up(quien.length ? `${f} (${quien.join(", ")})` : f);
+    });
   }
 
   // ═══ 3. Lectura de la ficha: lo que ya tiene, como respuestas ═══════════
@@ -320,6 +337,14 @@
       }
     }
     return null;
+  }
+
+  function reconocerHigiene(p, crudo, s) {
+    const cep = key(crudo).match(/^CEPILLADO (.+) VECES AL DIA$/);
+    if (cep) { s.cepillado = cep[1]; return true; }
+    if (p === "USA SEDA DENTAL" || p === "NO USA SEDA DENTAL") { s.seda = p.startsWith("NO") ? "No" : "Sí"; return true; }
+    if (p === "USA ENJUAGUE" || p === "NO USA ENJUAGUE") { s.enjuague = p.startsWith("NO") ? "No" : "Sí"; return true; }
+    return false;
   }
 
   // Cada reconocedor recibe la parte normalizada (p), la original (crudo) y el estado;
@@ -403,15 +428,13 @@
         if (/SIN PLACA/.test(p)) s.placa = "No";
         return true;
       }
+      if (reconocerHigiene(p, crudo, s)) return true;
       const otro = buscar(OTROS_HAB, p);
       if (otro) s.otrosHab.add(otro);
       return Boolean(otro);
     },
     "Antecedentes odontológicos": (p, crudo, s) => {
-      const cep = key(crudo).match(/^CEPILLADO (.+) VECES AL DIA$/);
-      if (cep) { s.cepillado = cep[1]; return true; }
-      if (p === "USA SEDA DENTAL" || p === "NO USA SEDA DENTAL") { s.seda = p.startsWith("NO") ? "No" : "Sí"; return true; }
-      if (p === "USA ENJUAGUE" || p === "NO USA ENJUAGUE") { s.enjuague = p.startsWith("NO") ? "No" : "Sí"; return true; }
+      if (reconocerHigiene(p, crudo, s)) return true; // fichas de antes: se pasa a Hábitos
       const limpieza = key(crudo).match(/^ULTIMA PROFILAXIS: (.+)$/);
       if (limpieza) { s.limpieza = opcion(LIMPIEZA, limpieza[1]) || ""; return Boolean(s.limpieza); }
       const odo = buscar(ODONTO, p);
@@ -420,8 +443,15 @@
     },
     "Antecedentes familiares": (p, crudo, s) => {
       const fam = buscar(FAMILIARES, p);
-      if (fam) s.familiares.add(fam);
-      return Boolean(fam);
+      if (fam) { s.familiares.add(fam); return true; }
+      const conQuien = crudo.match(/^([^(]+)\(([^)]*)\)\s*$/);
+      const nombre = conQuien && buscar(FAMILIARES, norm(conQuien[1]));
+      if (!nombre) return false;
+      const quien = entreParentesis(crudo).map((t) => opcion(PARIENTES, t));
+      if (!quien.length || quien.some((x) => !x)) return false;
+      s.familiares.add(nombre);
+      s.famQuien[nombre] = PARIENTES.filter((x) => quien.includes(x) || (s.famQuien[nombre] || []).includes(x));
+      return true;
     }
   };
 
@@ -441,7 +471,9 @@
         return enfermedadesFinales(s).filter((t, i) => !nombres(lista[i]).includes(norm(t)));
       }
       case "Hábitos": return habitosFinales(s);
-      case "Antecedentes odontológicos": return higiene(s) ? higiene(s).split(", ") : [];
+      case "Antecedentes odontológicos": return odontoTexto(s);
+      case "Antecedentes familiares": // solo el parentesco, que la lista no puede guardar
+        return familiaresFinales(s).filter((t) => t.includes("("));
       default: return [];
     }
   }
@@ -464,6 +496,9 @@
   function reproduce(titulo, crudo, s, deLista) {
     const k = key(crudo);
     if (titulo === "Alertas médicas" && /^ASA\b/.test(k)) return true;
+    if (titulo === "Antecedentes odontológicos" && reconocerHigiene(norm(crudo), crudo, crearEstado())) {
+      return textoDe("Hábitos", s).some((t) => key(t) === k);
+    }
     if (deLista || LISTAS[titulo]) {
       const fresco = crearEstado();
       if (vigente(titulo, norm(crudo), crudo, s) && RECONOCEDORES[titulo](norm(crudo), crudo, fresco)
@@ -530,7 +565,9 @@
       if (titulo === "Motivo de consulta" || titulo === "Enfermedad actual") {
         const propio = titulo === "Motivo de consulta" ? motivoFinal(s) : enfermedadActual(s);
         // Si ya tiene algo (texto o etiqueta de su lista), no se toca.
-        plan[titulo] = { marcar: [], quitar: [], alias: {}, texto: actual.length || lista.length ? spaces(seccion.texto) : propio };
+        const previo = spaces(seccion.texto);
+        const conservado = titulo === "Motivo de consulta" && actual.length ? entreComillas(previo) : previo;
+        plan[titulo] = { marcar: [], quitar: [], alias: {}, texto: actual.length || lista.length ? conservado : propio };
         continue;
       }
 
@@ -618,7 +655,9 @@
       }
       if (!sigue()) return resultado;
       const partes = partir(paso.texto);
-      extra.forEach((parte) => { if (!partes.some((x) => norm(x) === norm(parte))) partes.push(parte); });
+      extra.forEach((parte) => {
+        if (!partes.some((x) => norm(x) === norm(parte) || norm(x).startsWith(`${norm(parte)} `))) partes.push(parte);
+      });
       // Lo que no se encontró en la lista reemplaza un «NIEGA».
       const texto = (extra.length ? partes.filter((p) => norm(p) !== "NIEGA") : partes).join(", ");
       if (textarea.value !== texto) setValue(textarea, texto);
@@ -727,21 +766,23 @@
         ${q("¿Alcohol?")}${segmento(s, "alcohol", ["No", ...FRECUENCIA])}
         ${q("¿Aprieta o rechina los dientes?")}${segmento(s, "bruxismo", ["No", "Sí"])}
         ${s.bruxismo === "Sí" ? `<div class="dlk-an-sub">${q("¿Cuándo?")}${chipsDe(s, "bruxTipo", ["Nocturno", "Diurno"])}${q("¿Usa placa?")}${segmento(s, "placa", ["Sí", "No"])}</div>` : ""}
+        ${q("¿Cuántas veces se cepilla al día?")}${segmento(s, "cepillado", ["1", "2", "3", "> 3"])}
+        <div class="dlk-an-row">${q("¿Seda?")}${segmento(s, "seda", ["Sí", "No"])}${q("¿Enjuague?")}${segmento(s, "enjuague", ["Sí", "No"])}</div>
         ${q("Otros")}${chipsDe(s, "otrosHab", OTROS_HAB)}${previosDe(s, "Hábitos")}` },
 
-    { titulo: "Antecedentes odontológicos e higiene",
-      resumen: (s) => [[...s.odontologicos].join(", "), s.cepillado && `cepillado ${s.cepillado}/día`].filter(Boolean).join(" · "),
+    { titulo: "Antecedentes odontológicos",
+      resumen: (s) => [[...s.odontologicos].join(", "), s.limpieza && `limpieza ${s.limpieza}`].filter(Boolean).join(" · "),
       cuerpo: (s) => `${q("Tratamientos anteriores")}${chipsDe(s, "odontologicos", ODONTO)}
         ${s.odontologicos.has("Exodoncias por movilidad") ? `<div class="dlk-an-alert dlk-an-warn"><b>Pérdida dental por periodontitis</b>Dato clave para el estadio.</div>` : ""}
         ${q("Última limpieza")}${segmento(s, "limpieza", LIMPIEZA)}
-        ${q("¿Cuántas veces se cepilla al día?")}${segmento(s, "cepillado", ["1", "2", "3", "> 3"])}
-        <div class="dlk-an-row">${q("¿Seda?")}${segmento(s, "seda", ["Sí", "No"])}${q("¿Enjuague?")}${segmento(s, "enjuague", ["Sí", "No"])}</div>
         ${previosDe(s, "Antecedentes odontológicos")}` },
 
     { titulo: "Antecedentes familiares",
-      resumen: (s) => (s.fam === false ? "Niega" : [...s.familiares].join(", ")),
+      resumen: (s) => (s.fam === false ? "Niega" : familiaresFinales(s).join(", ").toLowerCase()),
       cuerpo: (s) => `${q("¿En la familia hay periodontitis, pérdida temprana de dientes o diabetes?")}${siNo(s, "fam")}
-        <div class="dlk-an-more ${s.fam ? "dlk-an-show" : ""}">${q("¿Cuáles?")}${chipsDe(s, "familiares", FAMILIARES)}</div>
+        <div class="dlk-an-more ${s.fam ? "dlk-an-show" : ""}">${q("¿Cuáles?")}${chipsDe(s, "familiares", FAMILIARES)}
+          ${[...s.familiares].map((f) => `<div class="dlk-an-sub"><h6>${esc(f)}: ¿quién?</h6><div class="dlk-an-chips">${PARIENTES.map((p) => `<button class="dlk-an-chip ${(s.famQuien[f] || []).includes(p) ? "dlk-an-on" : ""}" data-quien="${esc(f)}" data-v="${esc(p)}">${esc(p)}</button>`).join("")}</div></div>`).join("")}
+        </div>
         ${previosDe(s, "Antecedentes familiares")}` },
 
     { titulo: "Revisión final",
@@ -758,8 +799,8 @@
           ${fila("Enfermedades", enfermedadesFinales(s).join(", ") || "NIEGA")}
           ${fila("Medicamentos", up([...s.meds].join(", ")) || "NIEGA")}
           ${fila("Hábitos", habitosFinales(s).join(", ") || "NIEGA")}
-          ${fila("Odontológicos", [up([...s.odontologicos].join(", ")), higiene(s)].filter(Boolean).join(". ") || "—")}
-          ${fila("Familiares", up([...s.familiares].join(", ")) || "NIEGA")}
+          ${fila("Odontológicos", [up([...s.odontologicos].join(", ")), ...odontoTexto(s)].filter(Boolean).join(". ") || "—")}
+          ${fila("Familiares", familiaresFinales(s).join(", ") || "NIEGA")}
         </dl>
         <div class="dlk-an-hint">Se escribe en la ficha al pulsar «Pasar a Dentalink». Lo que ya estaba y no se reconoce se conserva.</div>`;
       } }
@@ -910,7 +951,7 @@
     alertas: (s) => { s.alergias.clear(); s.profilaxis.clear(); s.embarazo = ""; s.semanas = ""; },
     enf: (s) => { s.enfermedades.clear(); s.det = {}; },
     med: (s) => { s.meds.clear(); s.medDesde = {}; },
-    fam: (s) => { s.familiares.clear(); }
+    fam: (s) => { s.familiares.clear(); s.famQuien = {}; }
   };
   function responder(s, clave, valor) {
     s[clave] = valor;
@@ -969,6 +1010,12 @@
       const motivo = MOTIVOS.find((m) => m.t === t.dataset.motivo);
       if (s.motivos.has(motivo.t)) s.motivos.delete(motivo.t);
       else { s.motivos.add(motivo.t); motivo.sint.forEach((x) => s.sintomas.add(x)); }
+      return pintar();
+    }
+    if (t.dataset.quien) {
+      const lista = (s.famQuien[t.dataset.quien] ||= []);
+      const i = lista.indexOf(t.dataset.v);
+      if (i >= 0) lista.splice(i, 1); else lista.push(t.dataset.v);
       return pintar();
     }
     if (t.dataset.enf) {
@@ -1202,7 +1249,7 @@
   if (globalThis.__DLK_ANAM_TEST__) {
     globalThis.__dlkAnamTest = {
       crearEstado, fmt, leerNumero, enfermedadActual, motivoFinal, avisos, gradoTabaco, asaSugerido,
-      alertasFinales, enfermedadesFinales, habitosFinales, higiene, estadoDesdeFicha, fichaVacia, ALIAS,
+      alertasFinales, enfermedadesFinales, habitosFinales, higiene, familiaresFinales, estadoDesdeFicha, fichaVacia, ALIAS,
       planEscritura, leerSecciones, aplicarPlan, PASOS, htmlPanel, montarPanel, alternarPanel, responder, partir,
       panelEstado: () => ({ montado: Boolean(panel.raiz), plegado: panel.plegado, estado: panel.estado })
     };
