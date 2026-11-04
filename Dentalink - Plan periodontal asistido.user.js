@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Dentalink - Plan periodontal asistido
 // @namespace    https://odontofamily.local/dentalink-plan-periodontal
-// @version      1.0.0
+// @version      1.0.1
 // @description  Crea planes periodontales desde los tratamientos pendientes de la valoración.
 // @author       Cris
 // @match        https://*.dentalink.cl/pacientes/*
 // @updateURL    https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Plan%20periodontal%20asistido.user.js
 // @downloadURL  https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/Dentalink%20-%20Plan%20periodontal%20asistido.user.js
-// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.3.0
+// @require      https://raw.githubusercontent.com/Cristianepv96/dentalink-tampermonkey-scripts/main/dentalink-utils.js?v=1.4.0
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -31,7 +31,7 @@
     watchPage
   } = utils;
 
-  const SCRIPT_VERSION = "1.0.0";
+  const SCRIPT_VERSION = "1.0.1";
   const PROFESSIONAL_NAME = "CRISTIAN EDUARDO PEÑA VILLAMIZAR";
   const PROFESSIONAL_PLAN_NAME = "CRISTIAN PEÑA";
   const JOB_STORAGE_KEY = "dlk_periodontal_plan_assistant_job_v1";

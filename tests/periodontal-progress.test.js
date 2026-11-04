@@ -116,7 +116,7 @@ test("la utilidad nueva amplía una instancia antigua ya cargada", () => {
   const legacyUtils = { legacyMarker: true };
   const utils = loadUtils(legacyUtils);
   assert.equal(utils, legacyUtils);
-  assert.equal(utils.version, "1.3.0");
+  assert.equal(utils.version, "1.4.0");
   assert.equal(typeof utils.calculatePeriodontalProgress, "function");
   assert.equal(utils.legacyMarker, true);
 });
@@ -565,4 +565,165 @@ test("no muestra como pendiente otro procedimiento incluido en el mismo plan del
   assert.deepEqual([...open.pending], ["16"]);
   assert.equal(progress.pendingCount, 4);
   assert.equal(progress.controlled, false);
+});
+
+// ─── Ciclos de tratamiento (caso real paciente 8946, anonimizado) ───
+// Dentalink muestra las evoluciones de la más nueva a la más antigua; el
+// número "(#id)" del encabezado crece con el tiempo.
+
+const PROFESSIONAL = "CRISTIAN EDUARDO PEÑA VILLAMIZAR";
+
+function evolution(id, lines) {
+  return [`${PROFESSIONAL} (#${id})`, `(a través de ${PROFESSIONAL} , EPS SAVIA SALUD- BELEN )`, ...lines];
+}
+
+function administrativeRecord(id, plan, tooth) {
+  const [quadrant, piece] = String(tooth).split("");
+  return evolution(id, [
+    `Plan de tratamiento #${plan}:`,
+    "Diagnóstico: [CIE-10] K053 - PERIODONTITIS CRONICA",
+    `Acción realizada: ALISADO RADICULAR, CAMPO CERRADO (CADA DIENTE) Pieza ${quadrant}.${piece} (CUPS 240301)`,
+    "-",
+    "Marcar como aclarada"
+  ]);
+}
+
+function clinicalRecord(id, plan, tooth, teeth) {
+  const [quadrant, piece] = String(tooth).split("");
+  return evolution(id, [
+    `Plan de tratamiento #${plan}:`,
+    "Diagnóstico: [CIE-10] K053 - PERIODONTITIS CRONICA",
+    `Acción realizada: ALISADO RADICULAR, CAMPO CERRADO (CADA DIENTE) Pieza ${quadrant}.${piece} (CUPS 240301)`,
+    "DIAGNÓSTICO: K05.3 - Periodontitis crónica",
+    "PROCEDIMIENTO: Raspado y Alisado Radicular (RAR) Campo Cerrado",
+    `Dientes: ${teeth}`,
+    "HORA INICIO: 11:32 am | HORA FINAL: 12:02 pm",
+    "ATENDIDO POR: Dr. Cristian Pena. Periodoncista."
+  ]);
+}
+
+const CYCLE_ONE = [
+  // Ciclo 1, de la más nueva a la más antigua.
+  clinicalRecord(69564, 21329, 37, "21, 24, 26, 27, 28, 37, 42 y 46"),
+  ...[42, 46, 28, 27, 26, 24, 21].map((tooth, index) => administrativeRecord(69563 - index, 21329, tooth)),
+  clinicalRecord(69135, 21081, 14, "14, 16, 17, 18"),
+  ...[16, 17, 18].map((tooth, index) => administrativeRecord(69134 - index, 21081, tooth)),
+  evolution(68268, [
+    "Plan de tratamiento #20211:",
+    "Acción realizada: CONSULTA DE PRIMERA VEZ POR ESPECIALISTA EN PERIODONCIA (CUPS 890242)",
+    "Se solicita autorización para realizar:",
+    "- [240301] Raspaje y alisado radicular a campo cerrado en 14, 16, 17, 18, 21, 24, 26, 27, 28, 37, 42, 46.",
+    "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses."
+  ])
+];
+
+const CONTROL_REQUEST = evolution(72029, [
+  "Escrita el 28 de octubre de 2026 11:17",
+  "Plan de tratamiento #22918:",
+  "Diagnóstico: [CIE-10] Z012 - EXAMEN ODONTOLOGICO",
+  "Acción realizada: CONSULTA DE CONTROL O DE SEGUIMIENTO POR ESPECIALISTA EN PERIODONCIA",
+  "Paciente acude a cita de valoración especializada por periodoncia.",
+  "Se solicita autorización para realizar:",
+  "- [240301] Raspaje y alisado radicular a campo cerrado en 16, 26, 36, 46.",
+  "NOTA IMPORTANTE: Se informa al paciente que es fundamental mantener controles periodontales cada 3 meses.",
+  "Cita 30min"
+]);
+
+function closedOf(progress) {
+  return progress.treatments.find((item) => item.key === "closed");
+}
+
+test("8946: el ciclo anterior completo queda controlado antes del control", () => {
+  const utils = loadUtils();
+  const progress = utils.calculatePeriodontalProgress(CYCLE_ONE.flat().join("\n"));
+  const closed = closedOf(progress);
+
+  assert.equal(closed.total, 12);
+  assert.equal(closed.completedCount, 12);
+  assert.equal(progress.controlled, true);
+});
+
+test("8946: el envío del control empieza un ciclo nuevo en 0/4", () => {
+  const utils = loadUtils();
+  const text = [CONTROL_REQUEST, ...CYCLE_ONE].flat().join("\n");
+  const progress = utils.calculatePeriodontalProgress(text);
+  const closed = closedOf(progress);
+
+  assert.deepEqual([...closed.requested], ["16", "26", "36", "46"]);
+  assert.deepEqual([...closed.completed], []);
+  assert.deepEqual([...closed.pending], ["16", "26", "36", "46"]);
+  assert.equal(progress.total, 4);
+  assert.equal(progress.completedCount, 0);
+  assert.equal(progress.percent, 0);
+  assert.equal(progress.controlled, false);
+});
+
+test("8946: los registros administrativos del nuevo plan no cuentan como realizados", () => {
+  const utils = loadUtils();
+  const text = [
+    ...[46, 36, 26, 16].map((tooth, index) => administrativeRecord(72328 - index, 23113, tooth)),
+    CONTROL_REQUEST,
+    ...CYCLE_ONE
+  ].flat().join("\n");
+  const closed = closedOf(utils.calculatePeriodontalProgress(text));
+
+  assert.equal(closed.total, 4);
+  assert.equal(closed.completedCount, 0);
+});
+
+test("8946: cuenta solo lo realizado del nuevo envío", () => {
+  const utils = loadUtils();
+  const partial = [
+    clinicalRecord(72325, 23113, 16, "16, 26"),
+    CONTROL_REQUEST,
+    ...CYCLE_ONE
+  ].flat().join("\n");
+  const partialClosed = closedOf(utils.calculatePeriodontalProgress(partial));
+  assert.deepEqual([...partialClosed.completed], ["16", "26"]);
+  assert.deepEqual([...partialClosed.pending], ["36", "46"]);
+
+  const complete = [
+    ...[36, 46, 26].map((tooth, index) => administrativeRecord(72328 - index, 23113, tooth)),
+    clinicalRecord(72325, 23113, 16, "16, 26, 36, 46"),
+    CONTROL_REQUEST,
+    ...CYCLE_ONE
+  ].flat().join("\n");
+  const progress = utils.calculatePeriodontalProgress(complete);
+  assert.equal(closedOf(progress).total, 4);
+  assert.equal(progress.completedCount, 4);
+  assert.equal(progress.controlled, true);
+});
+
+test("el orden en pantalla no altera el ciclo: se usa el número de evolución", () => {
+  const utils = loadUtils();
+  const newestFirst = [CONTROL_REQUEST, ...CYCLE_ONE];
+  const oldestFirst = [...newestFirst].reverse();
+  const a = utils.calculatePeriodontalProgress(newestFirst.flat().join("\n"));
+  const b = utils.calculatePeriodontalProgress(oldestFirst.flat().join("\n"));
+
+  assert.deepEqual([...closedOf(b).pending], [...closedOf(a).pending]);
+  assert.equal(b.total, 4);
+});
+
+test("una solicitud nueva con el ciclo anterior incompleto conserva lo pendiente", () => {
+  const utils = loadUtils();
+  const text = [
+    evolution(300, [
+      "Se solicita autorización para realizar:",
+      "- [240401] Drenaje periodontal en 36."
+    ]),
+    clinicalRecord(200, 10, 16, "16"),
+    evolution(100, [
+      "Se solicita autorización para realizar:",
+      "- [240301] Raspaje y alisado radicular a campo cerrado en 16, 17."
+    ])
+  ].flat().join("\n");
+  const progress = utils.calculatePeriodontalProgress(text);
+  const closed = closedOf(progress);
+  const drainage = progress.treatments.find((item) => item.key === "drainage");
+
+  assert.deepEqual([...closed.completed], ["16"]);
+  assert.deepEqual([...closed.pending], ["17"]);
+  assert.deepEqual([...drainage.pending], ["36"]);
+  assert.equal(progress.total, 3);
 });

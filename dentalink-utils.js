@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dentalink - Utils (base compartida)
 // @namespace    https://odontofamily.local/dentalink-utils
-// @version      1.3.0
+// @version      1.4.0
 // @description  Utilidades compartidas para los scripts de Dentalink.
 // @author       Cris
 // @match        https://*.dentalink.cl/*
@@ -19,13 +19,13 @@
   "use strict";
 
   const existingUtils = window.__dlkUtils;
-  if (existingUtils?.version === "1.3.0"
-    && typeof existingUtils.getPendingPeriodontalItems === "function") return;
+  if (existingUtils?.version === "1.4.0"
+    && typeof existingUtils.splitEvolutionEntries === "function") return;
 
   // Amplía una instancia antigua en vez de abandonarla. Esto permite que una
   // copia cacheada cargada por otro userscript no bloquee las funciones nuevas.
   const utils = existingUtils || {};
-  utils.version = "1.3.0";
+  utils.version = "1.4.0";
 
   // ─── DOM helpers ───
 
@@ -214,8 +214,7 @@
     );
   };
 
-  utils.parseRequestedPeriodontalTreatments = function (text) {
-    const requested = emptyTreatmentSets();
+  function addExplicitRequests(target, text) {
     let inAuthorizationBlock = false;
 
     String(text || "").split("\n").forEach((line) => {
@@ -238,9 +237,11 @@
       const treatment = utils.identifyPeriodontalTreatment(line);
       if (!treatment) return;
       const requestText = line.replace(/\s+\(\d+\)\.?\s*$/, "");
-      addTreatmentItems(requested, treatment, utils.extractTeeth(requestText));
+      addTreatmentItems(target, treatment, utils.extractTeeth(requestText));
     });
+  }
 
+  function addAdministrativeRecords(target, text) {
     String(text || "").split(/(?=Acci[oó]n realizada:)/i).forEach((segment) => {
       const lines = segment.split("\n");
       const actionLine = lines[0] || "";
@@ -257,15 +258,47 @@
       const teeth = clinicalTeeth.length
         ? clinicalTeeth
         : piece ? [`${piece[1]}${piece[2]}`] : [];
-      addTreatmentItems(requested, treatment, teeth);
+      addTreatmentItems(target, treatment, teeth);
     });
+  }
 
+  function treatmentSetsToLists(sets) {
     return Object.fromEntries(
       PERIODONTAL_TREATMENTS.map((treatment) => [
         treatment.key,
-        sortedTreatmentItems(requested[treatment.key])
+        sortedTreatmentItems(sets[treatment.key])
       ])
     );
+  }
+
+  utils.parseRequestedPeriodontalTreatments = function (text) {
+    const requested = emptyTreatmentSets();
+    addExplicitRequests(requested, text);
+    addAdministrativeRecords(requested, text);
+    return treatmentSetsToLists(requested);
+  };
+
+  // Separa el historial en evoluciones ordenadas en el tiempo. Dentalink
+  // muestra primero la más reciente, pero el número "(#id)" del encabezado
+  // crece con cada evolución, así que se ordena por ese número y no por la
+  // posición en pantalla. Un texto sin encabezados es una sola evolución.
+  utils.splitEvolutionEntries = function (text) {
+    const entries = [];
+    let current = { id: -1, lines: [] };
+    String(text || "").split("\n").forEach((line) => {
+      const header = line.trim().match(/^.+?\s+\(#(\d+)\)$/);
+      if (header) {
+        if (current.lines.length) entries.push(current);
+        current = { id: Number(header[1]), lines: [line] };
+        return;
+      }
+      current.lines.push(line);
+    });
+    if (current.lines.length) entries.push(current);
+
+    return entries
+      .map((entry, index) => ({ id: entry.id, index, text: entry.lines.join("\n") }))
+      .sort((a, b) => a.id - b.id || a.index - b.index);
   };
 
   utils.defaultPeriodontalControlNote = DEFAULT_PERIODONTAL_CONTROL_NOTE;
@@ -372,20 +405,53 @@ Cita 20 min`;
     );
   };
 
+  // Avance por ciclo de tratamiento. Cada solicitud explícita ("Se solicita
+  // autorización…") reinicia sus piezas: lo realizado antes no cuenta para
+  // el nuevo envío. Si el ciclo anterior estaba completo, la solicitud abre
+  // un ciclo nuevo y lo anterior deja de contarse; si quedaba algo
+  // pendiente, se conserva junto con lo nuevo.
+  function periodontalCycleState(text) {
+    const state = new Map();
+    const itemKey = (key, item) => `${key}|${item}`;
+    const eachItem = (sets, callback) => PERIODONTAL_TREATMENTS.forEach((treatment) => {
+      (sets[treatment.key] || []).forEach((item) => callback(treatment.key, item));
+    });
+
+    utils.splitEvolutionEntries(text).forEach((entry) => {
+      const explicit = emptyTreatmentSets();
+      addExplicitRequests(explicit, entry.text);
+      const administrative = emptyTreatmentSets();
+      addAdministrativeRecords(administrative, entry.text);
+      const completed = utils.parseCompletedPeriodontalTreatments(entry.text);
+
+      const hasExplicit = PERIODONTAL_TREATMENTS.some((treatment) => explicit[treatment.key].size);
+      if (hasExplicit && state.size && [...state.values()].every((item) => item.completed)) {
+        state.clear();
+      }
+      eachItem(explicit, (key, item) => {
+        state.set(itemKey(key, item), { key, item, completed: false });
+      });
+      // Los registros administrativos y las evoluciones clínicas también
+      // demuestran que el tratamiento existe, aunque la solicitud antigua no
+      // siga el formato actual; no reinician lo ya realizado.
+      eachItem(administrative, (key, item) => {
+        if (!state.has(itemKey(key, item))) state.set(itemKey(key, item), { key, item, completed: false });
+      });
+      eachItem(completed, (key, item) => {
+        state.set(itemKey(key, item), { key, item, completed: true });
+      });
+    });
+
+    return state;
+  }
+
   utils.calculatePeriodontalProgress = function (text) {
-    const requested = utils.parseRequestedPeriodontalTreatments(text);
-    const completedRaw = utils.parseCompletedPeriodontalTreatments(text);
+    const state = [...periodontalCycleState(text).values()];
     const treatments = PERIODONTAL_TREATMENTS.map((treatment) => {
-      const requestedItems = new Set(requested[treatment.key] || []);
-      const completedItems = new Set(completedRaw[treatment.key] || []);
-
-      // Una evolución clínica válida también demuestra que el tratamiento
-      // existió, aunque la solicitud antigua no siga el formato actual.
-      completedItems.forEach((item) => requestedItems.add(item));
-
-      const requestedList = sortedTreatmentItems(requestedItems);
+      const items = state.filter((item) => item.key === treatment.key);
+      const requestedList = sortedTreatmentItems(items.map((item) => item.item));
       const completedList = sortedTreatmentItems(
-        [...completedItems].filter((item) => requestedItems.has(item))
+        items.filter((item) => item.completed).map((item) => item.item)
       );
       const completedSet = new Set(completedList);
       const pendingList = requestedList.filter((item) => !completedSet.has(item));
