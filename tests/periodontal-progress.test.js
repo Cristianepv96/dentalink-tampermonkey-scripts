@@ -337,7 +337,9 @@ test("el resumen mantiene todas sus utilidades dentro del sandbox de Tampermonke
   );
 
   assert.match(source, /@grant\s+GM_openInTab/);
-  assert.doesNotMatch(source, /@grant\s+unsafeWindow/);
+  // unsafeWindow solo se usa para leer el editor de Dentalink (PGrama) y la
+  // lista de versiones (__STATE); las utilidades siguen dentro del script.
+  assert.doesNotMatch(source, /__dlkUtils/);
   assert.doesNotMatch(source, /@require/);
   assert.match(source, /const watchPage = \(callback, options = \{\}\) =>/);
   assert.match(source, /const registerPanel = \(panel, options = \{\}\) =>/);
